@@ -4,7 +4,9 @@
 
 Lumina 是一个多模型融合的实时对话系统，包含语音识别（STT）、语义轮次检测（STD）、多模态输入处理（文本、语音、图像）、长短期记忆管理、以及大语言模型（LLM）与文本转语音（TTS）服务。
 
-项目流程图请参考：[Archi 流程图](./archi.png)
+项目流程图：
+![archi](https://github.com/user-attachments/assets/7655ce84-c09b-44ad-ac36-3510b101026e)
+
 
 ---
 
