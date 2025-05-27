@@ -1,0 +1,1 @@
+# models/transcript.py 数据类，存储 transcript 相关的 dataclass

@@ -1,0 +1,1 @@
+# models/dialogue.py 数据类，存储 dialogue 相关的 dataclass 如 轮内状态

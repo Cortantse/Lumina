@@ -1,0 +1,1 @@
+# app/memory/embeddings.py 文本向量化封装

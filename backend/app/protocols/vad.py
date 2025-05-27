@@ -1,0 +1,1 @@
+# app/protocols/vad.py 语音活动检测接口

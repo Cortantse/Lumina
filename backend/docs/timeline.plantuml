@@ -1,0 +1,83 @@
+@startuml
+participant Frontend
+participant "iFlytek STT" as STT
+participant "Semantic Turn Detection" as STD
+participant LLM
+participant UI
+
+start
+
+Frontend -> Frontend : 0–20ms\n缓冲 frame1
+note right of Frontend : VAD 需完整帧才能判断
+Frontend -> Frontend : 20ms\nVAD 检测到说话，启动上传
+Frontend -> STT : 发送 frame1 (20ms)
+
+Frontend -> Frontend : 20–40ms\n缓冲 frame2
+Frontend -> STT : 40ms\n上传 frame2
+STT -> STT : 接收 frame2
+activate STT
+STT -> UI : partial1 “打” (~100ms)
+deactivate STT
+
+Frontend -> Frontend : 40–60ms\n缓冲 frame3
+Frontend -> STT : 60ms\n上传 frame3
+STT -> STT : 接收 frame3
+activate STT
+STT -> UI : partial2 “打开” (~140ms)
+deactivate STT
+
+Frontend -> Frontend : 60–80ms\n缓冲 frame4
+Frontend -> STT : 80ms\n上传 frame4
+STT -> STT : 接收 frame4
+
+Frontend -> Frontend : 80–100ms\n缓冲 frame5
+Frontend -> STT : 100ms\n上传 frame5
+STT -> STT : 接收 frame5
+
+note over Frontend,STT
+静音累积 ≥100ms\n(100–170ms)
+→ 170ms 发送 End-of-Stream
+end note
+
+Frontend -> STT : End-of-Stream (170ms)
+activate STT
+STT -> STD : final1 “打开灯并” (~230ms)
+deactivate STT
+
+activate STD
+STD -> STT : 不完整 → 等待更多输入
+deactivate STD
+
+note left of Frontend
+200–220ms 再次讲话缓冲 frame10
+end note
+Frontend -> Frontend : 220ms\nVAD 检测→上传 frame10
+Frontend -> STT : 接收 frame10
+
+Frontend -> Frontend : 220–240ms\n缓冲 frame11
+Frontend -> STT : 240ms\n上传 frame11
+STT -> STT : 接收 frame11
+activate STT
+STT -> UI : partial3 “播放” (~300ms)
+deactivate STT
+
+note over Frontend,STT
+静音累积 ≥100ms\n(240–335ms)
+→ 335ms 发送 End-of-Stream
+end note
+
+Frontend -> STT : End-of-Stream (335ms)
+activate STT
+STT -> STD : final2 “播放音乐” (~395ms)
+deactivate STT
+
+activate STD
+STD -> LLM : 完整 → 触发应答
+deactivate STD
+
+activate LLM
+LLM -> UI : “好的，已为您打开灯并播放音乐” (~595ms)
+deactivate LLM
+
+stop
+@enduml

@@ -1,0 +1,1 @@
+# app/stt/websocket_adapter.py websocket 接受/发送帧适配
