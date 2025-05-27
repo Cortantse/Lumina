@@ -103,82 +103,7 @@ lumina/
 
 所有模块使用以下 Python 规范确保模块解耦清晰：
 
-### Protocol（接口协议）
-
-Protocol 用于定义模块行为接口，无需继承特定基类，只需明确方法签名即可。示例：
-
-```python
-from typing import Protocol
-
-class STTClient(Protocol):
-    async def send_audio(self, segment: SpeechSegment) -> PartialTranscript: ...
-    async def close_stream(self) -> FinalTranscript: ...
-```
-
-### Dataclass（数据类）
-
-Dataclass 是用于结构化数据传输的数据类，自动实现了初始化和表示方法。
-
-```python
-from dataclasses import dataclass
-
-@dataclass
-class AudioFrame:
-    data: bytes
-    timestamp: float
-```
-
-
-
----
-
-# Lumina
-
-Lumina is a real-time multimodal dialogue system that integrates streaming STT, semantic turn detection, memory retrieval, and multi-agent LLM orchestration. 本项目为 Lumina 的前后端一体化仓库，适用于桌面级对话助手原型构建。
-
-项目核心流程图请参考：[Archi 架构图](./archi.png)
-
----
-
-## 📁 项目结构总览
-
-```
-lumina/
-├── backend/                         # FastAPI 后端核心逻辑
-│   └── app/
-│       ├── api/                    # HTTP/WebSocket 接口
-│       ├── core/                   # 配置、日志、监控
-│       ├── protocols/              # 各模块协议接口定义
-│       ├── models/                 # 数据类定义
-│       ├── stt/                    # 流式语音识别客户端（如讯飞）
-│       ├── std/                    # 语义轮次检测模块
-│       ├── llm/                    # LLM 接入（OpenAI / 本地）
-│       ├── tts/                    # TTS 接入模块（待定）
-│       ├── multimodal/             # 多模态输入处理（图像、音频）
-│       ├── memory/                 # 记忆存储（FAISS 等）
-│       ├── retrieval/              # 检索引擎（向量相似度）
-│       ├── services/               # 编排流程 Orchestrator
-│       └── main.py                 # 启动入口
-│
-├── frontend/                        # 前端桌面客户端（Tauri + Vue3）
-│   ├── src/                        # 页面逻辑与组件
-│   ├── public/                     # 静态资源
-│   ├── tauri.conf.json             # Tauri 配置
-│   └── package.json                # 前端依赖与脚本
-│
-├── docker/                          # Docker & 容器部署
-│   ├── Dockerfile
-│   └── docker-compose.yml
-│
-├── tests/                           # 单元 + 集成测试
-├── archi.png                        # 架构流程图
-├── requirements.txt                # 后端依赖
-└── README.md                       # 当前说明文档
-```
-
----
-
-## 🔗 模块接口协议（Protocol）
+### 🔗 模块接口协议（Protocol）
 
 采用 Python 3 的 `typing.Protocol` 定义模块之间的接口协议，保持低耦合、强规范：
 
@@ -195,7 +120,7 @@ class STTClient(Protocol):
 
 ---
 
-## 📦 数据模型（@dataclass）
+### 📦 数据模型（@dataclass）
 
 数据模型用于模块间传递中间状态，使用 `@dataclass` 定义结构化对象：
 
@@ -273,9 +198,5 @@ pytest tests/
 * 多模态输入（图像、语音、事件）统一处理路径
 * 面向 Agent 场景的记忆存取、上下文感知对话
 * LLM 可配置（支持 OpenAI / 本地模型 / 插件）
-
----
-
-欢迎贡献者加入一起完善 Lumina！
 
 
