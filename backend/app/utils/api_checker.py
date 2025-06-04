@@ -17,7 +17,6 @@ import concurrent.futures
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from app.utils.entity import TEMPLATE_REQUEST, Request
-from app.utils.global_vars import have_checked
 import app.core.config as config # Import config
 import app.utils.exception as exception
 
@@ -415,28 +414,12 @@ class APIChecker:
             if not filtered_apis:
                 return None
 
-            # 根据实时负载排序，负载最低的排在前面
-            filtered_apis.sort(key=self.get_api_load)
-
-            # 选择前50%负载最低的API进行轮询
-            top_apis = filtered_apis[:max(1, len(filtered_apis) // 2)]
-
-            # 使用轮询法（Round Robin）在top_apis中选择API
+            # 使用轮询法（Round Robin）在filtered_apis中选择API
             current_index = self._model_rr_index.get(model, 0)
-            selected_api = top_apis[current_index % len(top_apis)]
-            self._model_rr_index[model] = (current_index + 1) % len(top_apis)
+            selected_api = filtered_apis[current_index % len(filtered_apis)]
+            self._model_rr_index[model] = (current_index + 1) % len(filtered_apis)
 
             return selected_api
-
-    def get_api_load(self, api):
-        """
-        从 api_limiter 获取当前 API 的实时标准化负载 (0.0 到 1.0)。
-        封装了对 api_limiter 的调用。
-        :param api: API Request 对象
-        :return: 负载比例 (0~1)，0为空闲，1为满载。
-        """
-        from app.utils.api_limiter import api_limiter
-        return api_limiter.get_normalized_load(api.api_key)
 
     def get_available_api_special_infer(self, model: str):
         """
@@ -452,27 +435,6 @@ class APIChecker:
                 envir_key = f"API_KEY_ali-test{random_num}"
             raise Exception("不支持ali的推理大模型")
             return None
-        elif model == "deepseek-ai/DeepSeek-R1" or model == "deepseek-reasoner" or model == "deepseek-r1":
-            # 获取一个0-2的随机数
-            random_num = random.randint(0, 11)
-            # 拼接字符串
-            envir_key = "API_KEY_deepseek-test"
-            if random_num <= 7:
-                # 使用deepseek
-                if random_num != 0:
-                    envir_key = f"API_KEY_deepseek-test{random_num}"
-                return Request(
-                    url="https://api.deepseek.com/chat/completions",
-                    model="deepseek-reasoner",
-                    api_key=os.getenv(envir_key)
-                )
-            else:
-                # 使用deepinfra
-                return Request(
-                    url="https://api.deepinfra.com/v1/openai/chat/completions",
-                    model="deepseek-ai/DeepSeek-R1",
-                    api_key=os.getenv("API_KEY_deep_infra")
-                )
         else:
             raise Exception("你选择的model无效")
 

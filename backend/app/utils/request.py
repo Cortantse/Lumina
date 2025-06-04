@@ -1,7 +1,4 @@
-import math
-import sys
 import time
-import os
 import json
 import asyncio
 import aiohttp
@@ -10,10 +7,6 @@ import app.utils.exception as exception
 from typing import List, Tuple, Dict, Optional, Any, Union
 from app.utils.entity import Request
 from app.utils.api_checker import api_checker
-from app.utils.api_limiter import api_limiter
-import random
-import warnings
-from app.utils.data_entity import Context
 import atexit
 
 # 全局session变量
@@ -85,97 +78,25 @@ async def _send_request_async(messages: List, request: Request, timeout=config.w
         # 断点
         breakpoint()
 
-
-    if "command" in model:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "response_format": {
-                "type": "text"
-            },
-            "documents":[],
-            "tools":[],
-            "temperature": request.temperature,
-            "p": request.top_p,
-            "stop_sequences": [],
-        }
-    # 检查是否为 jamba 模型
-    elif "jamba" in model:
-        payload = {
-            "model": model,
-            "messages": messages,
-            "documents":[],
-            "tools":[],
-            "response_format": {
-                "type": "text"
-            },
-            "n": 1,
-            "max_tokens": 4096, # 最大生成token为4096
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "stop": [],
-        }
-    elif model == "mistral-large-latest" or model == "mistral-small-latest":
-        payload = {
-            "messages": messages,
-            "model": model,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "response_format": {
-                "type": "text"
-            },
-            "stop": "string",
-            "stream": False,
-            # "stream_options": None,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "tools": None,
-            "tool_choice": "none",
-            "logprobs": False,
-            "top_logprobs": None
-        }
-    elif model == "google/gemini-2.5-flash":
-        payload = {
-            "messages": messages,
-            "model": model,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "response_format": {
-                "type": "text"
-            },
-            "stop": None,
-            "stream": False,
-            # "stream_options": None,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "tools": None,
-            # "tool_choice": "none",
-            "logprobs": False,
-            "top_logprobs": None,
-            "thinking_budget": 0
-        }
-    else:
-        payload = {
-            "messages": messages,
-            "model": model,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "response_format": {
-                "type": "text"
-            },
-            "stop": None,
-            "stream": False,
-            # "stream_options": None,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "tools": None,
-            # "tool_choice": "none",
-            "logprobs": False,
-            "top_logprobs": None,
-            "thinking_budget": 0
-        }
+    payload = {
+        "messages": messages,
+        "model": model,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "response_format": {
+            "type": "text"
+        },
+        "stop": None,
+        "stream": False,
+        # "stream_options": None,
+        "temperature": request.temperature,
+        "top_p": request.top_p,
+        "tools": None,
+        # "tool_choice": "none",
+        "logprobs": False,
+        "top_logprobs": None,
+        "thinking_budget": 0
+    }
 
     headers = {
         'Content-Type': 'application/json',
@@ -462,7 +383,6 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
     
     while retries <= max_retries:
         request = None # 在每次重试开始时重置 request
-        permission_acquired = False # 跟踪当前尝试是否获取了许可
 
         try:
             # 1. 获取可用 API，传递提取出的供应商信息
@@ -482,31 +402,6 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
             # 修改请求参数
             request.temperature = temperature  # type: ignore
             request.top_p = top_p  # type: ignore
-
-
-            # 2. 获取 API 限制许可
-            # 设置一个极长的超时（1小时）作为平衡选择:
-            # 1. 足够长 - 在实际应用中几乎等同于"无限"等待，一般资源都会在几分钟内释放
-            # 2. 安全保障 - 保留有限超时，防止API限流器可能的bug导致永久阻塞
-            # 3. 异步等待 - 不会阻塞线程，其他任务仍能继续执行
-            api_timeout = 3600  # 1小时
-            
-            # 让系统耐心等待API限流器的许可
-            permission_acquired = await api_limiter.acquire_permission(request, messages, timeout=api_timeout)
-
-            if not permission_acquired:
-                # 几乎不应该到达这里，除非API限流器内部有问题
-                # 或者超过了1小时的超长等待时间
-                exception.print_warning(
-                    send_request_async,
-                    f"API限流器拒绝许可 (模型: {actual_model_name}, Key: ...{request.api_key[-6:]})，可能是限流器内部异常。正在重试 {retries}/{max_retries}...",
-                    "高风险"  # 提高风险级别，因为这种情况不应该发生
-                )
-                last_exception = Exception(f"API permission denied for key ...{request.api_key[-6:]} after extended wait")
-                await asyncio.sleep(delay)
-                retries += 1
-                delay = min(delay * 1.5, timeout * 4)  # 增加延迟
-                continue
 
             # 3. 发送请求 (内部已有重试逻辑)
             # 内部重试次数减少，因为外部已有重试循环
@@ -557,16 +452,6 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
             retries += 1
             delay = min(delay * 1.5, timeout * 8) # 发生错误，增加延迟
             # 不需要手动 continue，循环会自动继续
-            # 注意：如果这里是因为 _send_request_with_retry_async 失败，
-            # 并且之前 permission_acquired 为 True，finally 块会释放许可
-
-        finally:
-            # 无论当前尝试成功、失败或进入下一次重试，
-            # 如果在当前尝试中 *成功获取* 了许可 (permission_acquired is True)，则释放它
-            if permission_acquired and request is not None:
-                api_limiter.release_permission(request, current_model=actual_model_name)
-                # 重置标记不是必须的，因为下次循环会重新初始化为 False
-                # permission_acquired = False
 
     # 如果所有重试都失败了
     exception.print_error(
@@ -587,36 +472,6 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
     return None, 0, 0 # 保持原有行为，返回 None
 
 
-# 添加新的包装函数
-async def send_request_async_context_wrapper(messages: List[Context], model_name, max_retries=config.max_retries,
-                                             timeout=config.wait_timeout, temperature=config.temperature,
-                                             top_p=config.top_p):
-    """
-    包装 send_request_async，接受 List[Context] 作为输入。
-    内部将 Context 对象列表转换为字典列表，然后调用原始的 send_request_async。
-
-    :param messages: 要发送的消息 (Context 对象列表)
-    :param model_name: 模型名称
-    :param max_retries: 最大重试次数
-    :param timeout: 超时时间（秒）
-    :param temperature: 温度参数
-    :param top_p: top_p参数
-    :return: 模型响应内容，总体token，生成token
-    """
-    # [p0] 将 Context 列表转换为字典列表
-    messages_dict = [msg.to_dict() for msg in messages]
-
-    # [p1] 调用原始的异步函数
-    return await send_request_async(
-        messages_dict,
-        model_name,
-        max_retries=max_retries,
-        timeout=timeout,
-        temperature=temperature,
-        top_p=top_p
-    )
-
-
 # 兼容同步调用的包装函数
 # [deprecated] 该函数已废弃，强烈建议在异步上下文中使用 await send_request_async(...)。
 # [attention] 这个函数唯一使用的场景是同步堵塞场景，即非并发场景，否则会产生线程开销
@@ -629,12 +484,6 @@ def send_request(messages, model_name, max_retries=config.max_retries, timeout=c
     强烈建议直接使用 await send_request_async(...)。
     """
     # 添加更明显的警告
-    if not suppress_warning:
-        warnings.warn(
-            "函数 send_request 已废弃，请直接使用 await send_request_async(...) 以避免线程阻塞和资源浪费。如果你是同步单请求场景就可以使用这个函数",
-            DeprecationWarning,
-            stacklevel=2
-        )
 
     try:
         # 尝试获取当前线程的事件循环

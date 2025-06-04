@@ -12,62 +12,9 @@ import warnings
 
 import numpy as np
 from app.utils.exception import print_error, print_warning
-from app.utils.global_vars import AGENTS
+from app.global_vars import AGENTS
 from string import Template
-from app.utils.data_entity import Context
 
-
-# --- 相似度计算函数 ---
-def compute_vector_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """
-    计算两个向量之间的余弦相似度
-    
-    Args:
-        vec1: 第一个向量
-        vec2: 第二个向量
-        
-    Returns:
-        余弦相似度，值在-1到1之间，越接近1表示越相似
-    """
-    # 检查输入类型，如果已经是numpy数组则直接使用，避免重复转换
-    if isinstance(vec1, np.ndarray) and isinstance(vec2, np.ndarray):
-        vec1_array = vec1
-        vec2_array = vec2
-    else:
-        # 将向量转换为numpy数组
-        vec1_array = np.array(vec1)
-        vec2_array = np.array(vec2)
-    
-    # 计算余弦相似度
-    dot_product = np.dot(vec1_array, vec2_array)
-    norm_vec1 = np.linalg.norm(vec1_array)
-    norm_vec2 = np.linalg.norm(vec2_array)
-    
-    # 避免除以零
-    if norm_vec1 == 0 or norm_vec2 == 0:
-        return 0
-    
-    similarity = dot_product / (norm_vec1 * norm_vec2)
-    
-    return float(similarity)
-
-
-def ignore_sklearn_warnings():
-    """
-    忽略scikit-learn的特定弃用警告，特别是'force_all_finite'参数的警告
-
-    这个函数应当在导入scikit-learn相关模块前调用，以避免显示特定的警告信息
-
-    使用示例:
-        from modules.utils.util import ignore_sklearn_warnings
-        ignore_sklearn_warnings()
-        # 然后再导入scikit-learn相关模块
-        from sklearn.xxx import xxx
-    """
-    # 忽略特定的弃用警告
-    warnings.filterwarnings("ignore", message="'force_all_finite' was renamed to 'ensure_all_finite'")
-
-    # 可以在这里添加更多需要忽略的警告
 
 # 读取 JSON 文件
 def load_api_keys(filename) -> List[str]:
@@ -81,7 +28,6 @@ def load_api_keys(filename) -> List[str]:
     except json.JSONDecodeError:
         print("文件格式错误，无法解析 JSON")
         return []
-
 
 
 def parse_json(text: str) -> dict:
@@ -327,65 +273,6 @@ def simple_progress(iterable=None, total=None, desc="Progress", bar_length=30):
         prefix=desc,
         length=bar_length
     )
-
-def check_contexts(contexts: list[Context], agent_name: Optional[str] = "Unknown Agent") -> bool:
-    '''
-    检查上下文列表是否符合预期的格式。
-
-    Args:
-        contexts: 要检查的上下文列表，每个元素是一个 Context 对象。
-        agent_name: (可选) 产生这些上下文的 Agent 的名字，用于警告信息。
-
-    Returns:
-        bool: 如果上下文格式有效则返回 True，否则返回 False (对于强制检查) 或 True (对于可选检查的警告)。
-
-    检查规则:
-    1. 强制检查：列表中的每个字典必须包含 "role" 和 "content" 键。
-    2. 可选检查：除了列表开头的 "system" 角色外，其余的 "user" 和 "assistant" 角色应交替出现。如果不符合，会打印警告但函数仍返回 True。
-    '''
-    # [p0] 检查列表是否为空
-    if not contexts:
-        print_error(check_contexts, f"Contexts for {agent_name} is empty")
-        return False
-    
-    # [p1] 强制检查
-    for context in contexts:
-        # 检查 context 是否有 role 和 content 属性 (对于 Context 对象总是如此，但作为防御性检查)
-        if not hasattr(context, 'role') or not hasattr(context, 'content'):
-            print_warning(check_contexts, f"Context for {agent_name} seems malformed: {context}", "高风险")
-            return False
-        # 不能出现 system/user/assistant 之外的角色
-        if context.role not in ["system", "user", "assistant"]:
-            print_error(check_contexts, f"Context for {agent_name} contains non-standard role: {context.role}")
-            return False
-    
-    # [p2] 可选检查 (角色交替)
-    if len(contexts) > 1:
-        start_index = 0
-        if contexts[0].role == "system":
-            start_index = 1
-        
-        # 如果只有 system 消息，或者只有 system 和一条其他消息，则认为交替有效
-        if len(contexts) <= start_index + 1:
-            return True
-
-        # 检查第一个非 system 消息是否为 assistant (通常应为 user)
-        if start_index < len(contexts) and contexts[start_index].role == "assistant":
-            # 第一个非 system 消息是 assistant，发出警告
-            print_warning(check_contexts, f"Contexts for {agent_name} do not start with 'user' after optional 'system'. First non-system message role: '{contexts[start_index].role}'", "低风险")
-            return True # 警告后停止检查并返回 True
-        
-        # 检查后续 user/assistant 是否交替
-        for i in range(start_index, len(contexts) - 1):
-            current_role = contexts[i].role
-            next_role = contexts[i+1].role
-
-            # 检查 user/assistant 角色是否连续相同
-            if current_role == next_role:
-                print_warning(check_contexts, f"Contexts for {agent_name} do not alternate between 'user' and 'assistant'. Found consecutive '{current_role}' at index {i} and {i+1}.", "低风险")
-                return True # 警告后停止检查并返回 True
-
-    return True # 检查通过，返回 True
 
 """
 # 示例1：迭代列表

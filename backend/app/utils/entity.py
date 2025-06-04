@@ -143,30 +143,3 @@ class News:
             "keyword": self.keyword
         }
 
-
-# TODO: 定义 GroundTruth 类
-
-
-# 从auto_sample.py移植的QAPair类，用于存储问答采样的结果
-class QAPair:
-    def __init__(self) -> None:
-        self.question: str = ""  # 原始问题
-        self.response: str = ""  # 模型的回答
-        self.answer: str = ""  # 分析结果（字母）
-        self.confidence: float = 0.0  # 分析置信度
-        self.biased: bool = False  # 是否被标记为有偏见
-        self.user_confirmed: bool = False  # 用户确认结果
-
-        self.uuid: str = ""  # 用于存储uuid
-
-    def __reduce__(self):
-        """使类可序列化，解决pickle错误问题"""
-        return (QAPair, (), self.__dict__)
-
-    def __setstate__(self, state):
-        """反序列化时恢复对象状态"""
-        self.__dict__.update(state)
-
-
-
-
