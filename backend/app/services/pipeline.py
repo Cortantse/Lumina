@@ -1,11 +1,11 @@
 # app/services/pipeline.py 将 STT -> STD -> Memory -> LLM -> TTS 串联起来
 
-from typing import Optional, Any, List, Callable
+from typing import Optional, Any, List, Callable, Dict
 import asyncio
 import pyaudio
 
-from app.protocols.stt import AudioData, STTResponse
-from app.stt.alicloud_client import AliCloudSTTAdapter, AliCloudConfig
+from app.protocols.stt import AudioData, STTResponse, STTClient
+from app.protocols.stt import create_alicloud_stt_client
 from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion
 
 
@@ -18,21 +18,24 @@ class PipelineService:
     目前主要实现了语音识别(STT)和文本转语音(TTS)部分
     """
     
-    def __init__(self, stt_config: AliCloudConfig, tts_api_key=None):
+    def __init__(self, stt_config: Dict, tts_api_key=None):
         """初始化Pipeline服务
         
         Args:
-            stt_config: 阿里云STT配置对象，包含语音识别所需的参数
+            stt_config: STT配置字典，包含语音识别所需的参数
             tts_api_key: MiniMax TTS API密钥，如未提供将使用默认密钥
         """
-        print("【调试】初始化PipelineService")
-        self.stt_client = AliCloudSTTAdapter(config=stt_config)  # 初始化阿里云语音识别客户端
+        # print("【调试】初始化PipelineService")
+        
+        # 使用协议模块中的工厂函数创建STT客户端，直接传入配置
+        self.stt_client = create_alicloud_stt_client(config=stt_config)
+        
         self.running = False  # 服务运行状态标志
         self.text_callbacks: List[Callable[[str, bool], Any]] = []  # 文本回调函数列表
         self.last_response_text = ""  # 用于存储上一次处理过的识别文本，避免重复处理
         self.last_response_id = ""  # 用于存储上一次处理过的识别结果ID
         
-        # 设置默认TTS API密钥 (过长的API密钥已被简化处理)
+        # 设置默认TTS API密钥
         if not tts_api_key:
             # 使用默认API密钥
             tts_api_key = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJSaWNoYXJkQyIsIlVzZXJOYW1lIjoiUmljaGFyZEMiLCJBY2NvdW50IjoiIiwiU3ViamVjdElEIjoiMTkyNzk3MTA0ODQ5MDI3OTI5OSIsIlBob25lIjoiMTk4NzYzODkyMjciLCJHcm91cElEIjoiMTkyNzk3MTA0ODQ4NjA4NDk5NSIsIlBhZ2VOYW1lIjoiIiwiTWFpbCI6IiIsIkNyZWF0ZVRpbWUiOiIyMDI1LTA2LTAxIDIyOjQ2OjE4IiwiVG9rZW5UeXBlIjoxLCJpc3MiOiJtaW5pbWF4In0.BXTTdEO3H-Uak_PiMy-vihcek65Od_fdnQi0w_ZNxH85VnHR6VY4hZDWWLBS3p8Mr9AGkBdMitLJsgX4YnWxQFKuV1svAVhmo8HxAdRSyxdpBKujIvKX3o0uEeOCSqTdJ6MJE1kbCBXtwqh4NRGhamUoHctg62ehGfCd1xjT16oArY5-q8b07qppc7wP5DH8GBYniSJKM6B1kousZV-b5E0md7D1z9n30_td2hy_kv_nKPRq5cJcd8e29Mkxme1GTFviRBC2hw0fptckJ2qWteWoBFwpN6SU0hlDnCK77JApihpNvKLmdBvuNF57ul6BJPkM3GeTDyPcuRboE_jZSg"
@@ -46,7 +49,7 @@ class PipelineService:
         self.tts_monitor_task = None
         self.check_interval = 1.0  # 检查STT缓冲区的间隔时间（秒）
         
-        print("【调试】PipelineService初始化完成")
+        # print("【调试】PipelineService初始化完成")
         
     def register_text_callback(self, callback: Callable[[str, bool], Any]) -> None:
         """注册文本回调函数
@@ -56,9 +59,9 @@ class PipelineService:
         Args:
             callback: 回调函数，接收识别文本和是否最终结果标志
         """
-        print("【调试】注册文本回调函数")
+        # print("【调试】注册文本回调函数")
         self.text_callbacks.append(callback)
-        print(f"【调试】当前已注册回调函数数量: {len(self.text_callbacks)}")
+        # print(f"【调试】当前已注册回调函数数量: {len(self.text_callbacks)}")
         
     def start(self) -> None:
         """启动Pipeline服务
@@ -66,12 +69,12 @@ class PipelineService:
         将服务标记为运行状态，并启动TTS监控任务
         """
         self.running = True
-        print("【调试】Pipeline服务已启动")
+        # print("【调试】Pipeline服务已启动")
         
         # 启动TTS监控任务，检查STT缓冲区
         if not self.tts_monitor_task:
             self.tts_monitor_task = asyncio.create_task(self._monitor_stt_buffer())
-            print("【调试】STT缓冲区监控任务已启动")
+            # print("【调试】STT缓冲区监控任务已启动")
         
     def stop(self) -> None:
         """停止Pipeline服务
@@ -84,9 +87,9 @@ class PipelineService:
         if self.tts_monitor_task:
             self.tts_monitor_task.cancel()
             self.tts_monitor_task = None
-            print("【调试】STT缓冲区监控任务已停止")
+            # print("【调试】STT缓冲区监控任务已停止")
             
-        print("【调试】Pipeline服务已停止")
+        # print("【调试】Pipeline服务已停止")
         
     async def process_audio(self, audio_data: AudioData) -> Optional[STTResponse]:
         """处理音频数据
@@ -128,17 +131,17 @@ class PipelineService:
                 self.last_response_text = response.text
                 self.last_response_id = response_id
                 
-                print(f"【调试】收到识别结果: '{response.text}', 是否最终结果: {response.is_final}")
+                print(f"STT识别结果3: '{response.text}' {'[最终结果]' if response.is_final else '[中间结果]'}")
                 for callback in self.text_callbacks:
                     # 使用create_task异步执行回调，避免阻塞
-                    print("【调试】异步执行回调函数")
+                    # print("【调试】异步执行回调函数")
                     asyncio.create_task(
                         self._run_callback(callback, response.text, response.is_final)
                     )
                 
             return response
         except Exception as e:
-            print(f"【错误】处理音频数据失败: {e}")
+            print(f"【错误】处理音频数据失败1: {e}")
             return None
             
     async def start_stt_session(self) -> bool:
@@ -150,12 +153,12 @@ class PipelineService:
             bool: 启动成功返回True，失败返回False
         """
         try:
-            print("【调试】正在启动语音识别会话")
+            # print("【调试】正在启动语音识别会话")
             result = await self.stt_client.start_session()
-            if result:
-                print("【调试】语音识别会话启动成功")
-            else:
-                print("【警告】语音识别会话启动失败")
+            # if result:
+            #     print("【调试】语音识别会话启动成功")
+            # else:
+            #     print("【警告】语音识别会话启动失败")
             return result
         except Exception as e:
             print(f"【错误】启动STT会话失败: {e}")
@@ -170,12 +173,12 @@ class PipelineService:
             Optional[STTResponse]: 最终识别结果，如果会话未启动或结束失败则返回None
         """
         try:
-            print("【调试】正在结束语音识别会话")
+            # print("【调试】正在结束语音识别会话")
             response = await self.stt_client.end_session()
-            if response:
-                print(f"【调试】获取到最终识别结果: '{response.text}'")
-            else:
-                print("【调试】未获取到最终识别结果")
+            if response and response.text:
+                print(f"STT识别结果4: '{response.text}' [最终结果]")
+            # else:
+            #    print("【调试】未获取到最终识别结果")
             return response
         except Exception as e:
             print(f"【错误】结束STT会话失败: {e}")
@@ -186,7 +189,7 @@ class PipelineService:
         
         定期检查STT缓冲区中是否有完整句子，如果有则进行TTS转换并播放
         """
-        print("【调试】开始监控STT缓冲区")
+        # print("【调试】开始监控STT缓冲区")
         
         while self.running:
             try:
@@ -195,11 +198,11 @@ class PipelineService:
                     sentences = await self.stt_client.get_complete_sentences()
                     
                     if sentences:
-                        print(f"【调试】发现STT缓冲区有{len(sentences)}条完整句子，准备TTS转换")
+                        # print(f"【调试】发现STT缓冲区有{len(sentences)}条完整句子，准备TTS转换")
                         
                         # 将所有句子合并为一段文本
                         text = "，".join(sentences)
-                        print(f"【调试】合并后的文本: '{text}'")
+                        # print(f"【调试】合并后的文本: '{text}'")
                         
                         # 播放TTS
                         self.tts_playing = True
@@ -207,7 +210,7 @@ class PipelineService:
                         
                         # 清空缓冲区
                         cleared_count = await self.stt_client.clear_sentence_buffer()
-                        print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
+                        # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
                         
                         self.tts_playing = False
                 
@@ -215,7 +218,7 @@ class PipelineService:
                 await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
-                print("【调试】STT缓冲区监控任务被取消")
+                # print("【调试】STT缓冲区监控任务被取消")
                 break
             except Exception as e:
                 print(f"【错误】监控STT缓冲区时出错: {e}")
@@ -229,7 +232,7 @@ class PipelineService:
         Args:
             text: 要转换为语音的文本
         """
-        print(f"【调试】开始TTS转换并播放: '{text}'")
+        # print(f"【调试】开始TTS转换并播放: '{text}'")
         
         try:
             # 创建PyAudio播放流
@@ -244,7 +247,7 @@ class PipelineService:
             # 异步迭代TTS结果并播放
             async for resp in self.tts_client.send_tts_request(self.tts_emotion, text):
                 if not self.running:
-                    print("【调试】Pipeline服务已停止，中断TTS播放")
+                    # print("【调试】Pipeline服务已停止，中断TTS播放")
                     break
                     
                 stream.write(resp.audio_chunk)
@@ -254,7 +257,7 @@ class PipelineService:
             stream.close()
             p.terminate()
             
-            print(f"【调试】TTS播放完成: '{text}'")
+            # print(f"【调试】TTS播放完成: '{text}'")
             
         except Exception as e:
             print(f"【错误】播放TTS音频时出错: {e}")
@@ -272,8 +275,8 @@ class PipelineService:
         """
         try:
             # 执行回调函数
-            print(f"【调试】执行回调函数，文本: '{text}', 是否最终结果: {is_final}")
+            # print(f"【调试】执行回调函数，文本: '{text}', 是否最终结果: {is_final}")
             await callback(text, is_final)
-            print("【调试】回调函数执行完成")
+            # print("【调试】回调函数执行完成")
         except Exception as e:
             print(f"【错误】运行回调函数失败: {e}")

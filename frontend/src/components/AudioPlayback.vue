@@ -13,10 +13,7 @@
     </div>
 
     <div class="options">
-      <label class="auto-play-option">
-        <input type="checkbox" v-model="autoPlayAfterRecording">
-        录音结束后自动播放
-      </label>
+      <!-- 移除自动播放选项 -->
     </div>
 
     <div class="microphone-selector">
@@ -57,6 +54,9 @@
 import { ref, onUnmounted, onMounted, getCurrentInstance } from 'vue';
 import { AudioCaptureInterface, MicrophoneDevice } from '../types/audio-processor';
 
+// 组件标识
+const COMPONENT_NAME = 'AudioPlayback';
+
 // 获取全局音频捕获接口
 const app = getCurrentInstance();
 const audioCapture = app?.appContext.config.globalProperties.$audioCapture as AudioCaptureInterface;
@@ -84,6 +84,50 @@ let audioBuffer: AudioBuffer | null = null;
 let heartbeatInterval: number | null = null;
 let originalOnmessage: ((event: MessageEvent<any>) => void) | null = null;
 
+// 资源控制相关变量
+let hasAudioControl = ref(false);
+let pendingOperation: Function | null = null; // 存储等待执行的操作
+
+// 监听资源释放请求
+const resourceReleaseHandler = (event: CustomEvent) => {
+  if (event.detail && event.detail.requestedBy) {
+    console.log(`[AudioPlayback] 收到来自 ${event.detail.requestedBy} 的资源释放请求`);
+    
+    // 如果正在录音，停止录音
+    if (isRecording.value) {
+      stopRecording(false);
+      isRecording.value = false;
+    }
+    
+    // 如果有WebSocket连接，关闭它
+    if (socket) {
+      socket.close();
+      socket = null;
+    }
+    
+    // 更新状态
+    hasAudioControl.value = false;
+    isGlobalCapturing.value = false;
+    
+    connectionStatus.value = `已释放音频控制权给 ${event.detail.requestedBy}`;
+  }
+};
+
+// 监听资源可用通知
+const resourceAvailableHandler = (event: CustomEvent) => {
+  if (event.detail && event.detail.availableFor === COMPONENT_NAME) {
+    console.log(`[AudioPlayback] 收到音频资源可用通知`);
+    hasAudioControl.value = true;
+    
+    // 如果有待处理的操作，执行它
+    if (pendingOperation) {
+      console.log(`[AudioPlayback] 执行待处理操作`);
+      pendingOperation();
+      pendingOperation = null;
+    }
+  }
+};
+
 // 监听 STT 结果
 const sttResultListener = (event: CustomEvent) => {
   if (event.detail && event.detail.text) {
@@ -93,12 +137,9 @@ const sttResultListener = (event: CustomEvent) => {
 
 // 监听录音完成事件
 const recordingCompletedListener = (event: CustomEvent) => {
-  if (autoPlayAfterRecording.value) {
-    // 短暂延迟后播放，确保录音已完全处理
-    setTimeout(() => {
-      playRecordedAudio();
-    }, 500);
-  }
+  // 移除自动播放逻辑
+  console.log('录音完成，可以手动播放');
+  hasRecordedAudio.value = true;
 };
 
 // 获取可用麦克风列表
@@ -139,23 +180,26 @@ const onMicrophoneChange = async () => {
   }
   
   connectionStatus.value = '正在切换麦克风...';
-  const success = await audioCapture.switchMicrophone(selectedMicrophoneId.value);
   
-  if (success) {
+  // 请求音频控制权
+  const success = await requestAudioControl();
+  if (!success) {
+    connectionStatus.value = '无法获取音频控制权，麦克风切换失败';
+    return;
+  }
+  
+  // 切换麦克风
+  const switchSuccess = await audioCapture.switchMicrophone(selectedMicrophoneId.value, COMPONENT_NAME);
+  
+  if (switchSuccess) {
     connectionStatus.value = '麦克风切换成功';
     isGlobalCapturing.value = true;
-    
-    // 发送全局麦克风切换事件，通知其他组件
-    window.dispatchEvent(new CustomEvent('microphone-changed', { 
-      detail: { 
-        deviceId: selectedMicrophoneId.value,
-        success: true 
-      } 
-    }));
+    hasAudioControl.value = true;
   } else {
     connectionStatus.value = '麦克风切换失败';
     // 恢复之前选择的麦克风
     selectedMicrophoneId.value = audioCapture.currentMicrophoneId || '';
+    hasAudioControl.value = false;
   }
 };
 
@@ -167,11 +211,32 @@ const getCurrentMicrophoneName = (): string => {
   return mic ? mic.label : `未知设备 (${audioCapture.currentMicrophoneId})`;
 };
 
+// 请求音频控制权
+const requestAudioControl = async (): Promise<boolean> => {
+  try {
+    if (audioCapture) {
+      const success = await audioCapture.requestAudioControl(COMPONENT_NAME);
+      hasAudioControl.value = success;
+      return success;
+    }
+    return false;
+  } catch (error) {
+    console.error('【错误】请求音频控制权失败:', error);
+    return false;
+  }
+};
+
 // 挂载时添加事件监听器
 onMounted(async () => {
+  // 添加事件监听
   window.addEventListener('stt-result', sttResultListener as EventListener);
   window.addEventListener('recording-completed', recordingCompletedListener as EventListener);
-  isGlobalCapturing.value = audioCapture.isInitialized;
+  window.addEventListener('audio-resource-release', resourceReleaseHandler as EventListener);
+  window.addEventListener('audio-resource-available', resourceAvailableHandler as EventListener);
+  
+  // 同步全局状态
+  isGlobalCapturing.value = audioCapture?.isInitialized || false;
+  hasAudioControl.value = audioCapture?.currentComponent === COMPONENT_NAME;
   
   // 加载麦克风列表
   await refreshMicrophoneList();
@@ -199,7 +264,7 @@ const connectWebSocket = async (): Promise<boolean> => {
     }
     
     connectionStatus.value = '正在连接服务器...';
-    socket = new WebSocket('ws://localhost:8000/ws/audio');
+    socket = new WebSocket('ws://localhost:8000/api/v1/ws/audio');
     
     socket.onopen = () => {
       console.log('【调试】WebSocket连接已建立');
@@ -260,15 +325,22 @@ const connectWebSocket = async (): Promise<boolean> => {
 const toggleRecording = async () => {
   if (isRecording.value) {
     await stopRecording();
-    // 停止录音的同时停止全局捕获
-    if (isGlobalCapturing.value) {
-      await toggleGlobalCapture();
-    }
   } else {
+    // 首先检查是否有其他组件正在使用麦克风
+    if (!hasAudioControl.value) {
+      // 请求音频控制权
+      const success = await requestAudioControl();
+      if (!success) {
+        connectionStatus.value = '无法获取音频控制权，无法开始录音';
+        return;
+      }
+    }
+    
     // 开始录音前确保全局捕获已开启
     if (!isGlobalCapturing.value) {
       await toggleGlobalCapture();
     }
+    
     await startRecording();
   }
 };
@@ -289,12 +361,20 @@ const startRecording = async () => {
     
     // 确保全局音频捕获已启动
     if (!isGlobalCapturing.value) {
-      await audioCapture.init(selectedMicrophoneId.value || undefined);
+      // 请求音频控制权并初始化捕获
+      const controlSuccess = await requestAudioControl();
+      if (!controlSuccess) {
+        connectionStatus.value = '无法获取音频控制权，无法启动捕获';
+        return;
+      }
+      
+      await audioCapture.init(selectedMicrophoneId.value || undefined, COMPONENT_NAME);
       isGlobalCapturing.value = true;
+      hasAudioControl.value = true;
     }
     
     // 开始使用全局缓存录音
-    audioCapture.startRecording();
+    audioCapture.startRecording(COMPONENT_NAME);
     
     // 将音频数据处理器添加到全局处理
     originalOnmessage = audioCapture.workletNode?.port.onmessage || null;
@@ -350,7 +430,7 @@ const stopRecording = async (sendStopSignal = true) => {
     isRecording.value = false;
     
     // 停止全局缓存录音
-    audioCapture.stopRecording();
+    audioCapture.stopRecording(COMPONENT_NAME);
     
     // 我们不停止全局音频捕获，只还原其处理方式
     if (audioCapture.workletNode && originalOnmessage) {
@@ -441,7 +521,7 @@ const combinePCMChunks = () => {
 // 播放录制的音频
 const playRecordedAudio = async () => {
   // 首先尝试播放全局缓存的音频
-  if (await audioCapture.playRecordedAudio()) {
+  if (await audioCapture.playRecordedAudio(COMPONENT_NAME)) {
     connectionStatus.value = '正在播放全局缓存录音...';
     return;
   }
@@ -518,13 +598,22 @@ const toggleGlobalCapture = async () => {
       }
       
       // 停止全局音频捕获
-      audioCapture.stop();
+      audioCapture.stop(COMPONENT_NAME);
       isGlobalCapturing.value = false;
+      hasAudioControl.value = false;
       connectionStatus.value = '已停止全局音频捕获';
     } else {
+      // 请求音频控制权
+      const success = await requestAudioControl();
+      if (!success) {
+        connectionStatus.value = '无法获取音频控制权，无法启动捕获';
+        return;
+      }
+      
       // 初始化并启动全局音频捕获
-      await audioCapture.init(selectedMicrophoneId.value || undefined);
+      await audioCapture.init(selectedMicrophoneId.value || undefined, COMPONENT_NAME);
       isGlobalCapturing.value = true;
+      hasAudioControl.value = true;
       connectionStatus.value = '全局音频捕获已启动，可以开始录音';
     }
   } catch (error) {
@@ -555,11 +644,18 @@ onUnmounted(() => {
   // 移除事件监听器
   window.removeEventListener('stt-result', sttResultListener as EventListener);
   window.removeEventListener('recording-completed', recordingCompletedListener as EventListener);
+  window.removeEventListener('audio-resource-release', resourceReleaseHandler as EventListener);
+  window.removeEventListener('audio-resource-available', resourceAvailableHandler as EventListener);
   
   // 确保恢复原始处理器
   if (audioCapture.workletNode && originalOnmessage) {
     audioCapture.workletNode.port.onmessage = originalOnmessage;
     originalOnmessage = null;
+  }
+  
+  // 如果当前组件有控制权，则释放
+  if (hasAudioControl.value) {
+    audioCapture.releaseAudioControl(COMPONENT_NAME);
   }
   
   // 不再关闭音频上下文，因为它现在是全局管理的

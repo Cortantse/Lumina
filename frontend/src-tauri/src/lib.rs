@@ -62,6 +62,7 @@ struct SocketManager {
     complete_speech_segments: Vec<Vec<i16>>, // 存储完整的语音段，用于回放功能
     current_voice_segment: Vec<i16>, // 用于收集当前的语音帧
     frames_without_voice: usize,     // 跟踪连续无语音的帧数
+    sent_to_python_segments: Vec<Vec<i16>>, // 存储发送到Python的音频段
 }
 
 impl SocketManager {
@@ -76,6 +77,7 @@ impl SocketManager {
             complete_speech_segments: Vec::new(), // 初始化完整语音段存储
             current_voice_segment: Vec::new(),  // 初始化当前语音段
             frames_without_voice: 0,            // 初始化无语音帧计数器
+            sent_to_python_segments: Vec::new(), // 初始化发送到Python的音频段
         }
     }
 
@@ -169,18 +171,8 @@ impl SocketManager {
             println!("[调试] 停止缓冲语音，已缓冲{}个样本", self.buffer.len());
             self.is_buffering = false;
             
-            // 保存完整的语音段用于回放
-            if !self.buffer.is_empty() {
-                self.complete_speech_segments.push(self.buffer.clone());
-                println!("[重要] ============ 语音段已保存! ============");
-                println!("[重要] 当前共有{}个语音段，最新语音段长度: {}个样本",
-                         self.complete_speech_segments.len(), self.buffer.len());
-                
-                // 限制保存的语音段数量，防止内存占用过大
-                if self.complete_speech_segments.len() > 10 {
-                    self.complete_speech_segments.remove(0);
-                }
-            }
+            // 注意：此处不再将整体缓冲区添加到语音段，因为语音段现在由add_voice_frame专门处理
+            // 以下操作只用于完整录音的功能
             
             // 分批发送，每批不超过SEND_BUFFER_THRESHOLD个样本
             let mut all_success = true;
@@ -242,8 +234,9 @@ impl SocketManager {
                     self.speech_segments.push(speech_segment);
                 }
                 
-                // 重置计数器，但不清空缓冲区，继续累积
+                // 重置计数器并清空缓冲区
                 self.samples_since_last_send = 0;
+                self.buffer.clear();
             }
         }
     }
@@ -258,7 +251,21 @@ impl SocketManager {
             None => return false,
         };
 
-        // println!("[调试] 发送语音段 ({}个样本)", segment.len());
+        println!("[调试] 发送语音段到Python ({}个样本)", segment.len());
+        
+        // 保存发送到Python的音频段
+        if segment.len() > 0 {
+            // 克隆一份数据保存
+            let segment_clone = segment.to_vec();
+            self.sent_to_python_segments.push(segment_clone);
+            
+            // 限制保存的段数，防止内存占用过大
+            if self.sent_to_python_segments.len() > 50 {
+                self.sent_to_python_segments.remove(0);
+            }
+            
+            println!("[调试] 已保存发送到Python的音频段，当前共有{}个段", self.sent_to_python_segments.len());
+        }
         
         // 先发送长度头
         let len_bytes = (segment.len() as u32).to_le_bytes();
@@ -292,8 +299,8 @@ impl SocketManager {
         }
 
         // 发送所有待处理的语音段
-        let mut success = true;
-        let segments_to_send = self.speech_segments.clone();
+        let success = true;
+        let _segments_to_send = self.speech_segments.clone();
         self.speech_segments.clear();
 
         // for (i, segment) in segments_to_send.iter().enumerate() {
@@ -344,7 +351,7 @@ impl SocketManager {
                         self.complete_speech_segments.remove(0);
                     }
                     
-                    println!("[调试] 当前已保存{}个语音段", self.complete_speech_segments.len());
+                    // println!("[调试] 当前已保存{}个语音段", self.complete_speech_segments.len());
                 } else {
                     println!("[调试] 语音段太短，丢弃 (长度: {})", self.current_voice_segment.len());
                 }
@@ -358,6 +365,43 @@ impl SocketManager {
                 self.current_voice_segment.extend_from_slice(samples);
             }
         }
+    }
+
+    // 获取发送到Python的音频段
+    fn get_sent_to_python_segments(&self) -> Vec<Vec<i16>> {
+        self.sent_to_python_segments.clone()
+    }
+    
+    // 清空发送到Python的音频段
+    fn clear_sent_to_python_segments(&mut self) {
+        self.sent_to_python_segments.clear();
+    }
+
+    // 获取所有发送到Python的语音段合并成一个
+    fn get_combined_speech_segment(&self) -> Vec<i16> {
+        // 如果没有语音段，返回空数组
+        if self.sent_to_python_segments.is_empty() {
+            return Vec::new();
+        }
+
+        // 计算总长度
+        let total_length: usize = self.sent_to_python_segments.iter()
+            .map(|segment| segment.len())
+            .sum();
+        
+        println!("[调试] 开始合并{}个语音识别段，总样本数: {}", 
+                self.sent_to_python_segments.len(), total_length);
+
+        // 创建合并后的数组
+        let mut combined = Vec::with_capacity(total_length);
+        
+        // 合并所有语音段
+        for segment in &self.sent_to_python_segments {
+            combined.extend_from_slice(segment);
+        }
+
+        println!("[调试] 语音识别段合并完成，总长度: {}个样本", combined.len());
+        combined
     }
 }
 
@@ -450,11 +494,11 @@ impl VadProcessor {
             self.silence_frames += 1;
             self.speech_frames = 0;
             if self.is_speaking {
-                println!("[调试] 检测到静音 (累计静音帧: {}), is_speaking: {}", self.silence_frames, self.is_speaking);
+                // println!("[调试] 检测到静音 (累计静音帧: {}), is_speaking: {}", self.silence_frames, self.is_speaking);
             }
             if self.silence_frames >= 30 && self.is_speaking {
                 self.is_speaking = false;
-                println!("[重要] ====== 检测到语音结束 (累计静音帧: {}) ======", self.silence_frames);
+                // println!("[重要] ====== 检测到语音结束 (累计静音帧: {}) ======", self.silence_frames);
                 event = VadEvent::SpeechEnd;
             }
         }
@@ -564,27 +608,28 @@ async fn process_audio_frame(
         // 根据VAD结果控制缓冲
         let mut socket_manager_guard = socket_manager.lock().unwrap();
         
-        // 使用新方法添加语音帧到当前语音段
+        // 使用新方法添加语音帧到当前语音段 - 这是保存VAD语音段的主要方法
         socket_manager_guard.add_voice_frame(&i16_samples, is_voice);
         
-        // 以下仍然保留原始的语音段处理逻辑
         match event {
             VadEvent::SpeechStart => {
-                println!("[调试] 检测到语音开始，开始缓冲语音数据");
+                println!("[调试] 检测到语音开始");
+                // 我们仍然保留原有的start_buffering逻辑，但只用于全局缓冲和STT处理
                 socket_manager_guard.start_buffering();
             },
             VadEvent::SpeechEnd => {
-                println!("[调试] 检测到语音结束，停止缓冲");
+                println!("[调试] 检测到语音结束");
+                // 停止全局缓冲
                 socket_manager_guard.stop_buffering();
                 
                 // 获取当前保存的语音段数量
                 let segment_count = socket_manager_guard.complete_speech_segments.len();
-                println!("[调试] 当前已保存{}个语音段", segment_count);
+                println!("[调试] 当前已保存{}个VAD语音段", segment_count);
             },
             _ => {}
         }
         
-        // 添加音频样本到缓冲区（仍然保留原有逻辑以保持兼容性）
+        // 添加音频样本到全局缓冲区（用于完整录音功能）
         socket_manager_guard.add_audio_samples(&i16_samples);
         
         // 发送事件到前端
@@ -663,7 +708,7 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
                         }
                     }
                 },
-                Err(e) => {
+                Err(_e) => {
                     // println!("[错误] 连接STT结果服务器失败: {}", e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
@@ -682,7 +727,7 @@ pub struct AudioSegment {
 
 #[command]
 async fn get_speech_segments() -> Result<Vec<AudioSegment>, String> {
-    println!("[调试] 获取语音段用于回放");
+    println!("[调试] 获取发送到Python的语音段用于回放");
     
     let socket_manager = get_socket_manager();
     let socket_manager_guard = match socket_manager.lock() {
@@ -693,10 +738,10 @@ async fn get_speech_segments() -> Result<Vec<AudioSegment>, String> {
         }
     };
     
-    // 获取所有完整语音段
-    let segments = socket_manager_guard.get_complete_speech_segments();
+    // 获取所有发送到Python的语音段
+    let segments = socket_manager_guard.get_sent_to_python_segments();
     
-    println!("[重要] 获取到{}个完整语音段", segments.len());
+    println!("[重要] 获取到{}个发送到Python的语音段", segments.len());
     
     if segments.is_empty() {
         println!("[调试] 没有可用的语音段");
@@ -732,8 +777,8 @@ async fn clear_speech_segments() -> Result<(), String> {
         }
     };
     
-    socket_manager_guard.clear_complete_speech_segments();
-    println!("[调试] 语音段已清空");
+    socket_manager_guard.clear_sent_to_python_segments();
+    println!("[调试] 发送到Python的语音段已清空");
     
     Ok(())
 }
@@ -760,12 +805,116 @@ async fn create_test_speech_segment() -> Result<(), String> {
         test_samples.push(sample as i16);
     }
     
-    // 保存测试音频段
-    socket_manager_guard.complete_speech_segments.push(test_samples);
-    println!("[重要] 测试语音段已创建，当前共有{}个语音段", 
-             socket_manager_guard.complete_speech_segments.len());
+    // 保存测试音频段到发送到Python的语音段
+    socket_manager_guard.sent_to_python_segments.push(test_samples);
+    println!("[重要] 测试语音段已创建，当前共有{}个发送到Python的语音段", 
+             socket_manager_guard.sent_to_python_segments.len());
     
     Ok(())
+}
+
+// 重置VAD处理器状态
+#[command]
+fn reset_vad_state() -> Result<String, String> {
+    println!("[信息] 重置VAD状态");
+    
+    // 获取VAD处理器并重置
+    let vad_processor = get_vad_processor();
+    let result = match vad_processor.lock() {
+        Ok(mut processor) => {
+            // 创建一个全新的处理器实例
+            *processor = VadProcessor::new();
+            println!("[信息] VAD状态已重置");
+            Ok("VAD状态已重置".to_string())
+        },
+        Err(e) => {
+            let error_msg = format!("获取VAD处理器锁失败: {}", e);
+            println!("[错误] {}", error_msg);
+            Err(error_msg)
+        }
+    };
+    
+    result
+}
+
+// 停止VAD处理
+#[command]
+fn stop_vad_processing() -> Result<String, String> {
+    println!("[信息] 停止VAD处理");
+    
+    // 获取VAD处理器
+    let vad_processor = get_vad_processor();
+    let result = match vad_processor.lock() {
+        Ok(mut processor) => {
+            // 手动触发语音结束事件
+            if processor.is_speaking {
+                processor.is_speaking = false;
+                processor.silence_frames = 30; // 设置足够的静音帧以确保语音结束
+                println!("[信息] 手动触发语音结束事件");
+            }
+            
+            // 获取SocketManager
+            let socket_manager = get_socket_manager();
+            let mut socket_manager_guard = match socket_manager.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    let error_msg = format!("获取Socket管理器锁失败: {}", e);
+                    println!("[错误] {}", error_msg);
+                    return Err(error_msg);
+                }
+            };
+            
+            // 停止缓冲并处理最后的数据，但不要清除已保存的发送到Python的语音段
+            socket_manager_guard.stop_buffering();
+            
+            // 保存发送到Python的语音段数量
+            let sent_segments_count = socket_manager_guard.sent_to_python_segments.len();
+            println!("[信息] 当前已保存{}个发送到Python的语音段", sent_segments_count);
+            
+            println!("[信息] VAD处理已停止");
+            Ok(format!("VAD处理已停止，有{}个语音段可供播放", sent_segments_count))
+        },
+        Err(e) => {
+            let error_msg = format!("获取VAD处理器锁失败: {}", e);
+            println!("[错误] {}", error_msg);
+            Err(error_msg)
+        }
+    };
+    
+    result
+}
+
+// 添加新命令获取合并后的语音段
+#[command]
+async fn get_combined_speech_segment() -> Result<AudioSegment, String> {
+    println!("[调试] 获取合并后的语音识别段");
+    
+    let socket_manager = get_socket_manager();
+    let socket_manager_guard = match socket_manager.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取SocketManager锁失败: {}", e);
+            return Err(format!("获取SocketManager失败: {}", e));
+        }
+    };
+    
+    // 获取合并后的语音段
+    let combined = socket_manager_guard.get_combined_speech_segment();
+    
+    if combined.is_empty() {
+        println!("[调试] 没有可用的语音识别段可合并");
+        return Err("没有可用的语音识别段可合并".into());
+    }
+    
+    println!("[重要] 合并后的语音识别段长度: {}个样本", combined.len());
+    
+    // 创建AudioSegment
+    let audio_segment = AudioSegment {
+        samples: combined,
+        sample_rate: SAMPLE_RATE,
+    };
+    
+    Ok(audio_segment)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -779,8 +928,11 @@ pub fn run() {
             process_audio_frame,
             start_stt_result_listener,
             get_speech_segments,
+            get_combined_speech_segment,
             clear_speech_segments,
-            create_test_speech_segment
+            create_test_speech_segment,
+            reset_vad_state,
+            stop_vad_processing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

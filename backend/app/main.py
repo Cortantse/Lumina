@@ -1,19 +1,17 @@
 # app/main.py 主函数，FastAPI + Websocket 启动入口
 import os
-import uuid
 import asyncio
-from typing import List
+from typing import Dict
 
 from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.protocols.stt import AudioData
+from app.protocols.stt import create_websocket_handler, create_socket_handler
 from app.services.pipeline import PipelineService
-from app.stt.alicloud_client import AliCloudConfig
-from app.stt.websocket_adapter import WebSocketSTTHandler
-from app.stt.socket_adapter import SocketSTTHandler
+from app.api.v1.audio import router as audio_router
+from app.api.v1.audio import initialize as initialize_audio_api
 
 # 加载环境变量
 load_dotenv()
@@ -41,32 +39,38 @@ async def startup_event():
     """启动事件，初始化全局服务"""
     global pipeline_service, websocket_handler, socket_handler
     
-    # 从环境变量获取阿里云配置
+    # 从环境变量获取配置
     app_key = os.environ.get("ALICLOUD_APP_KEY", "your_app_key")
+    access_key_id = os.environ.get("ALIYUN_AK_ID", "")
+    access_key_secret = os.environ.get("ALIYUN_AK_SECRET", "")
+    token = os.environ.get("ALIYUN_TOKEN", "")
     url = os.environ.get("ALICLOUD_URL", "wss://nls-gateway-cn-shenzhen.aliyuncs.com/ws/v1")
-    print(f"阿里云AppKey: {app_key}")
     
     # 从环境变量获取MiniMax TTS API Key
     tts_api_key = os.environ.get("MINIMAX_API_KEY", None)
-    if tts_api_key:
-        print("已从环境变量获取MiniMax TTS API Key")
-    else:
-        print("未找到MiniMax TTS API Key，将使用默认值")
     
-    # 创建阿里云STT配置
-    stt_config = AliCloudConfig(app_key=app_key, url=url)
+    # 创建阿里云STT配置字典
+    stt_config: Dict = {
+        "app_key": app_key,
+        "access_key_id": access_key_id,
+        "access_key_secret": access_key_secret,
+        "token": token,
+        "url": url
+    }
     
     # 初始化Pipeline服务
     pipeline_service = PipelineService(stt_config=stt_config, tts_api_key=tts_api_key)
     pipeline_service.start()
     
-    # 初始化WebSocket处理器
-    websocket_handler = WebSocketSTTHandler(stt_client=pipeline_service.stt_client)
+    # 初始化API模块
+    initialize_audio_api(pipeline_service)
     
-    # 初始化Socket处理器并启动Socket STT服务器
-    socket_handler = SocketSTTHandler(stt_client=pipeline_service.stt_client)
+    # 使用protocols/stt.py中的工厂函数初始化WebSocket处理器
+    websocket_handler = create_websocket_handler(stt_client=pipeline_service.stt_client)
+    
+    # 使用protocols/stt.py中的工厂函数初始化Socket处理器
+    socket_handler = create_socket_handler(stt_client=pipeline_service.stt_client)
     asyncio.create_task(socket_handler.start())
-    
 
 
 @app.on_event("shutdown")
@@ -81,62 +85,8 @@ async def shutdown_event():
         await socket_handler.stop()
 
 
-
-@app.websocket("/ws/audio")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket端点，处理音频数据"""
-    client_id = str(uuid.uuid4())
-    
-    try:
-        # 接受WebSocket连接
-        await websocket.accept()
-        
-        # 启动STT会话
-        if await pipeline_service.start_stt_session():
-            await websocket.send_json({"status": "ready"})
-            
-            # 循环处理音频数据
-            async for data in websocket.iter_bytes():
-                try:
-                    # 检查是否是控制消息
-                    if len(data) < 100:  # 假设控制消息非常小
-                        try:
-                            text_data = data.decode('utf-8')
-                            if 'stop' in text_data:
-                                # 停止识别
-                                result = await pipeline_service.end_stt_session()
-                                if result and result.text:
-                                    await websocket.send_json({
-                                        "text": result.text,
-                                        "is_final": True
-                                    })
-                                continue
-                        except Exception:
-                            pass  # 不是文本数据，当作音频处理
-                    
-                    # 处理音频数据
-                    audio_data = AudioData(data=data)
-                    response = await pipeline_service.process_audio(audio_data)
-                    
-                    # 发送识别结果
-                    if response and response.text:
-                        await websocket.send_json({
-                            "text": response.text,
-                            "is_final": response.is_final
-                        })
-                except Exception as e:
-                    print(f"处理音频数据失败: {e}")
-                    await websocket.send_json({"error": str(e)})
-        else:
-            await websocket.send_json({"error": "启动语音识别会话失败"})
-            
-    except WebSocketDisconnect:
-        print(f"WebSocket连接断开: {client_id}")
-    except Exception as e:
-        print(f"WebSocket处理异常: {e}")
-    finally:
-        # 结束STT会话
-        await pipeline_service.end_stt_session()
+# 直接注册音频路由
+app.include_router(audio_router, prefix="/api/v1")
 
 
 def main():
@@ -144,8 +94,6 @@ def main():
     # 从环境变量获取主机和端口
     host = os.environ.get("API_HOST", "0.0.0.0")
     port = int(os.environ.get("API_PORT", 8000))
-    
-    print(f"启动Lumina语音助手API服务，监听 {host}:{port}")
     
     # 启动FastAPI应用
     uvicorn.run(app, host=host, port=port)

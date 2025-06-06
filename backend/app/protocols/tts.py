@@ -30,7 +30,6 @@ class TTSResponse:
     - audio_chunk: 原始的 PCM bytes。
     """
     audio_chunk: bytes
-    is_end: bool = False  # 是否为最后一块数据
 
 
 class TTSClient(Protocol):
@@ -106,10 +105,10 @@ class MiniMaxTTSClient(TTSClient):
             "event": "task_start",
             "model": MODULE,
             "voice_setting": {
-                "voice_id": "male-qn-qingse",
-                "speed": 1,
-                "vol": 1,
-                "pitch": 0,
+                "voice_id": "moss_audio_3d7914ec-42ca-11f0-b24c-2e48b7cbf811",
+                "speed": 1.1,    #范围[0.5,2]  生成声音的语速，可选，取值越大，语速越快
+                "vol": 1,      #范围（0,10]     生成声音的音量，可选，取值越大，音量越高
+                "pitch": 1,    #范围[-12,12] 生成声音的语调，可选，（0为原音色输出，取值需为整数）。
                 "emotion": emotion.value
             },
             "audio_setting": {

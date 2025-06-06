@@ -126,11 +126,15 @@ export interface AudioCaptureInterface {
    */
   currentMicrophoneId: string | null;
   
+  // 新增资源管理相关属性
+  currentComponent: string | null; // 当前占用麦克风的组件
+  pendingComponentRequest: string | null; // 待处理的组件请求
+  
   /**
    * 初始化音频捕获
    * @param deviceId 可选，指定使用的麦克风设备ID
    */
-  init(deviceId?: string): Promise<void>;
+  init(deviceId?: string, componentId?: string): Promise<void>;
   
   /**
    * 获取可用的麦克风设备列表
@@ -141,27 +145,27 @@ export interface AudioCaptureInterface {
    * 切换到指定的麦克风设备
    * @param deviceId 麦克风设备ID
    */
-  switchMicrophone(deviceId: string): Promise<boolean>;
+  switchMicrophone(deviceId: string, requestingComponent?: string): Promise<boolean>;
   
   /**
    * 停止音频捕获
    */
-  stop(): void;
+  stop(componentName?: string): boolean;
   
   /**
    * 开始录音，缓存音频帧
    */
-  startRecording(): void;
+  startRecording(componentName?: string): boolean;
   
   /**
    * 停止录音
    */
-  stopRecording(): void;
+  stopRecording(componentName?: string): boolean;
   
   /**
    * 播放缓存的音频
    */
-  playRecordedAudio(): Promise<boolean>;
+  playRecordedAudio(componentName?: string): Promise<boolean>;
   
   /**
    * 获取录音时长（秒）
@@ -171,7 +175,7 @@ export interface AudioCaptureInterface {
   /**
    * 清空缓存的录音
    */
-  clearRecordedAudio(): void;
+  clearRecordedAudio(componentName?: string): boolean;
   
   /**
    * 切换实时播放状态
@@ -185,6 +189,10 @@ export interface AudioCaptureInterface {
    * @param frames 缓冲区大小（帧数）
    */
   setRealtimeBufferSize(frames: number): void;
+  
+  // 资源管理相关方法
+  requestAudioControl(componentName: string): Promise<boolean>;
+  releaseAudioControl(componentName: string): boolean;
 }
 
 /**

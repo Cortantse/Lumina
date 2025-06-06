@@ -36,32 +36,32 @@ class AliCloudConfig:
         Raises:
             ValueError: 当无法获取有效的Token时抛出
         """
-        print("【调试】开始初始化阿里云配置")
+        # print("【调试】开始初始化阿里云配置")
         # 如果没有提供token，则尝试从环境变量获取
         if not self.token:
             self.access_key_id = self.access_key_id or os.getenv('ALIYUN_AK_ID', '')
             self.access_key_secret = self.access_key_secret or os.getenv('ALIYUN_AK_SECRET', '')
-            print(f"【调试】阿里云AccessKeyId: "
-                  f"{self.access_key_id[:4]}***{self.access_key_id[-4:] if len(self.access_key_id) > 8 else ''}")
-            print(f"【调试】阿里云AccessKeySecret长度: {len(self.access_key_secret)}位")
+            # print(f"【调试】阿里云AccessKeyId: "
+            #      f"{self.access_key_id[:4]}***{self.access_key_id[-4:] if len(self.access_key_id) > 8 else ''}")
+            # print(f"【调试】阿里云AccessKeySecret长度: {len(self.access_key_secret)}位")
             
             if self.access_key_id and self.access_key_secret:
                 # 使用AccessKey创建Token
-                print("【调试】使用AccessKey创建Token")
+                # print("【调试】使用AccessKey创建Token")
                 self.token = self.create_token()
             else:
                 # 如果没有提供access_key，则尝试从环境变量获取token
                 self.token = os.getenv('ALIYUN_TOKEN', '')
-                print(f"【调试】从环境变量获取Token: {'已获取' if self.token else '未设置'}")
+                # print(f"【调试】从环境变量获取Token: {'已获取' if self.token else '未设置'}")
                 
         if not self.token:
             raise ValueError("未提供阿里云Token，请设置access_key或直接提供token")
         
-        print(f"【调试】阿里云Token: "
-              f"{self.token[:4]}***{self.token[-4:] if len(self.token) > 8 else ''}")
-        print(f"【调试】阿里云服务地址: {self.url}")
-        print(f"【调试】阿里云区域: {self.region}")
-        print("【调试】阿里云配置初始化完成")
+        # print(f"【调试】阿里云Token: "
+        #      f"{self.token[:4]}***{self.token[-4:] if len(self.token) > 8 else ''}")
+        # print(f"【调试】阿里云服务地址: {self.url}")
+        # print(f"【调试】阿里云区域: {self.region}")
+        # print("【调试】阿里云配置初始化完成")
     
     def create_token(self) -> str:
         """创建阿里云访问令牌
@@ -75,7 +75,7 @@ class AliCloudConfig:
             ValueError: 创建Token失败时抛出
             Exception: API调用异常时抛出
         """
-        print("【调试】开始创建阿里云Token")
+        # print("【调试】开始创建阿里云Token")
         # 创建AcsClient实例
         client = AcsClient(
             self.access_key_id,
@@ -89,19 +89,19 @@ class AliCloudConfig:
         request.set_domain('nls-meta.cn-shanghai.aliyuncs.com')  # 元数据服务的域名
         request.set_version('2019-02-28')  # API版本
         request.set_action_name('CreateToken')  # API操作名称
-        print("【调试】已配置CreateToken请求参数")
+        # print("【调试】已配置CreateToken请求参数")
 
         try:
             # 发送请求并获取响应
-            print("【调试】发送CreateToken请求")
+            # print("【调试】发送CreateToken请求")
             response = client.do_action_with_exception(request)
-            print("【调试】已收到CreateToken响应")
+            # print("【调试】已收到CreateToken响应")
             jss = json.loads(response)
             
             if 'Token' in jss and 'Id' in jss['Token']:
                 token = jss['Token']['Id']
                 expire_time = jss['Token']['ExpireTime']
-                print(f"【调试】阿里云Token已创建，过期时间: {expire_time}")
+                # print(f"【调试】阿里云Token已创建，过期时间: {expire_time}")
                 return token
             else:
                 print(f"【错误】创建Token失败，响应内容: {jss}")
@@ -125,7 +125,7 @@ class AliCloudSTTAdapter(STTClient):
         Args:
             config: 阿里云语音识别服务的配置信息
         """
-        print("【调试】初始化阿里云语音识别适配器")
+        # print("【调试】初始化阿里云语音识别适配器")
         self.config = config  # 阿里云配置
         self.transcriber = None  # 识别器实例
         self.loop = asyncio.get_event_loop()  # 异步事件循环
@@ -151,7 +151,7 @@ class AliCloudSTTAdapter(STTClient):
         self.last_activity_time = 0  # 上次活动时间
         self.reconnect_lock = asyncio.Lock()  # 重连锁，防止并发重连
         
-        print("【调试】阿里云语音识别适配器初始化完成")
+        # print("【调试】阿里云语音识别适配器初始化完成")
         
     async def start_session(self) -> bool:
         """开始语音识别会话
@@ -161,7 +161,7 @@ class AliCloudSTTAdapter(STTClient):
         Returns:
             bool: 启动成功返回True，失败返回False
         """
-        print("【调试】开始启动语音识别会话")
+        # print("【调试】开始启动语音识别会话")
         self.future = self.loop.create_future()  # 创建Future对象用于异步通知
         self._result_ready.clear()  # 清除结果就绪状态
         self.current_text = ""  # 清空当前识别文本
@@ -177,8 +177,8 @@ class AliCloudSTTAdapter(STTClient):
             self.complete_sentences = []
         
         # 创建识别器实例，设置各种回调函数
-        print(f"【调试】创建NlsSpeechTranscriber实例，URL: {self.config.url}, "
-              f"AppKey: {self.config.app_key[:4]}***")
+        # print(f"【调试】创建NlsSpeechTranscriber实例，URL: {self.config.url}, "
+        #      f"AppKey: {self.config.app_key[:4]}***")
         self.transcriber = nls.NlsSpeechTranscriber(
             url=self.config.url,  # 服务端点URL
             token=self.config.token,  # 访问令牌
@@ -190,12 +190,12 @@ class AliCloudSTTAdapter(STTClient):
             on_error=self._on_error,  # 错误回调
             on_close=self._on_close  # 连接关闭回调
         )
-        print("【调试】NlsSpeechTranscriber实例已创建")
+        # print("【调试】NlsSpeechTranscriber实例已创建")
         
         # 在单独的线程中启动识别会话，避免阻塞主线程
         def start_in_thread():
             try:
-                print("【调试】线程内: 开始调用transcriber.start()")
+                # print("【调试】线程内: 开始调用transcriber.start()")
                 # 启动实时语音识别
                 self.transcriber.start(
                     aformat="pcm",  # 音频格式：PCM格式
@@ -208,7 +208,7 @@ class AliCloudSTTAdapter(STTClient):
                     # enable_words=True,  # 是否开启返回词信息，默认是false。
                     # enable_semantic_sentence_detection=True  # 是否开启语义断句，可选，默认是False。
                 )
-                print("【调试】线程内: transcriber.start()调用成功")
+                # print("【调试】线程内: transcriber.start()调用成功")
             except Exception as exc:  # 使用不同的变量名避免闭包问题
                 # 如果启动失败，通过Future通知等待的协程
                 print(f"【错误】线程内: 启动识别会话失败: {exc}")
@@ -257,27 +257,39 @@ class AliCloudSTTAdapter(STTClient):
             print("【调试】正在重连中，等待重连完成...")
             # 如果已经达到最大重连次数，则抛出异常
             if self.reconnect_count >= self.max_reconnect_attempts:
+                print("【错误】重连次数已达上限，无法发送音频数据")
                 raise RuntimeError("重连次数已达上限，无法发送音频数据")
-            await asyncio.sleep(0.1)  # 等待一段时间
+            # 等待一段时间后返回空结果，让调用者可以继续尝试
+            await asyncio.sleep(0.2)
+            return STTResponse(text="", is_final=False)
         
         # 更新活动时间
         self.last_activity_time = time.time()
         
-        # 发送音频数据到识别器
-        # print(f"【调试】发送音频数据，大小: {len(audio_data.data)}字节")  # 这行会产生大量日志，可能影响性能
-        self.transcriber.send_audio(audio_data.data)
-        
-        # 只返回新增的文本内容，避免前端显示重复内容
-        response_text = self.current_text
-        if self.last_sent_text and not self.is_final and response_text.startswith(self.last_sent_text):
-            # 如果当前文本以上次发送的文本开头（且不是最终结果），只返回新增部分
-            response_text = response_text[len(self.last_sent_text):]
-        
-        # 如果是最终结果或者有新内容，更新last_sent_text
-        if self.is_final or response_text:
-            self.last_sent_text = self.current_text
-        
-        return STTResponse(text=response_text, is_final=self.is_final)
+        try:
+            # 发送音频数据到识别器
+            # print(f"【调试】发送音频数据，大小: {len(audio_data.data)}字节")  # 这行会产生大量日志，可能影响性能
+            self.transcriber.send_audio(audio_data.data)
+            
+            # 只返回新增的文本内容，避免前端显示重复内容
+            response_text = self.current_text
+            if self.last_sent_text and not self.is_final and response_text.startswith(self.last_sent_text):
+                # 如果当前文本以上次发送的文本开头（且不是最终结果），只返回新增部分
+                response_text = response_text[len(self.last_sent_text):]
+            
+            # 如果是最终结果或者有新内容，更新last_sent_text
+            if self.is_final or response_text:
+                self.last_sent_text = self.current_text
+            
+            return STTResponse(text=response_text, is_final=self.is_final)
+        except Exception as e:
+            print(f"【错误】发送音频数据时出错: {e}")
+            # 如果是连接相关错误，尝试标记transcriber为None以便下次重新创建
+            if "connection" in str(e).lower() or "socket" in str(e).lower():
+                print("【错误】检测到连接错误，清除transcriber引用")
+                self.transcriber = None
+                raise RuntimeError("语音识别会话未启动")
+            raise
 
     async def end_session(self) -> Optional[STTResponse]:
         """结束语音识别会话
@@ -292,27 +304,27 @@ class AliCloudSTTAdapter(STTClient):
             return None  # 会话未启动，直接返回None
         
         # 重置结果就绪事件，准备等待最终结果
-        print("【调试】结束会话: 准备停止识别")
+        # print("【调试】结束会话: 准备停止识别")
         self._result_ready.clear()
         
         # 在单独线程中停止识别会话
         def stop_in_thread():
             try:
                 # 检查transcriber对象是否有必要的属性，避免调用stop()时出错
-                print("【调试】线程内: 检查transcriber对象是否已正确初始化")
+                # print("【调试】线程内: 检查transcriber对象是否已正确初始化")
                 has_task_id = hasattr(self.transcriber, '_NlsSpeechTranscriber__task_id')
                 
                 # 记录当前的task_id用于调试
-                if has_task_id:
-                    task_id_value = getattr(self.transcriber, '_NlsSpeechTranscriber__task_id', None)
-                    print(f"【调试】线程内: _NlsSpeechTranscriber__task_id存在，值为: {task_id_value}")
-                else:
-                    print("【调试】线程内: _NlsSpeechTranscriber__task_id属性不存在")
+                # if has_task_id:
+                #     task_id_value = getattr(self.transcriber, '_NlsSpeechTranscriber__task_id', None)
+                #     print(f"【调试】线程内: _NlsSpeechTranscriber__task_id存在，值为: {task_id_value}")
+                # else:
+                #     print("【调试】线程内: _NlsSpeechTranscriber__task_id属性不存在")
                 
                 if has_task_id and self.transcriber._NlsSpeechTranscriber__task_id:
-                    print("【调试】线程内: 调用transcriber.stop()")
+                    # print("【调试】线程内: 调用transcriber.stop()")
                     self.transcriber.stop()  # 停止识别器
-                    print("【调试】线程内: transcriber.stop()调用成功")
+                    # print("【调试】线程内: transcriber.stop()调用成功")
                 else:
                     print("【调试】线程内: 识别会话未正确启动，跳过停止操作")
             except Exception as e:
@@ -341,13 +353,13 @@ class AliCloudSTTAdapter(STTClient):
             # 无论成功与否，都尝试关闭识别器并释放资源
             if self.transcriber:
                 try:
-                    print("【调试】关闭识别器")
+                    # print("【调试】关闭识别器")
                     self.transcriber.shutdown()
-                    print("【调试】识别器已关闭")
+                    # print("【调试】识别器已关闭")
                 except Exception as e:
                     print(f"【错误】关闭识别器时出错: {e}")
                 self.transcriber = None  # 清除识别器引用
-                print("【调试】识别器引用已清除")
+                # print("【调试】识别器引用已清除")
 
     def _on_start(self, message: str, *args: Any) -> None:
         """识别开始回调函数
@@ -358,10 +370,10 @@ class AliCloudSTTAdapter(STTClient):
             message: 识别开始的消息
             *args: 其他可能的参数
         """
-        print(f"【调试】收到识别开始回调: {message}")
+        # print(f"【调试】收到识别开始回调: {message}")
         # 如果future还未完成，标记为成功完成，通知等待的协程继续执行
         if not self.future.done():
-            print("【调试】通知future识别已成功启动")
+            # print("【调试】通知future识别已成功启动")
             self.loop.call_soon_threadsafe(self.future.set_result, True)
     
     def _on_result_changed(self, message: str, *args: Any) -> None:
@@ -396,18 +408,18 @@ class AliCloudSTTAdapter(STTClient):
             message: 句子结束回调消息（JSON字符串）
         """
         try:
-            print(f"【调试】句子结束回调: {message}")
+            # print(f"【调试】句子结束回调: {message}")
             result = json.loads(message)
             
             if 'payload' in result and 'result' in result['payload']:
                 sentence_text = result['payload']['result']
-                print(f"【调试】识别到一个完整的句子: '{sentence_text}'")
+                print(f"STT识别结果: '{sentence_text}' [句子完成]")
                 
                 # 添加到完整句子缓冲区
                 with self.sentences_lock:
                     self.complete_sentences.append(sentence_text)
                     sentences_count = len(self.complete_sentences)
-                    print(f"【调试】当前缓冲区包含 {sentences_count} 个完整句子")
+                    # print(f"【调试】当前缓冲区包含 {sentences_count} 个完整句子")
                 
                 # 更新当前文本和状态
                 self.current_text = sentence_text
@@ -431,12 +443,12 @@ class AliCloudSTTAdapter(STTClient):
             message: 识别完成回调消息（JSON字符串）
         """
         try:
-            print(f"【调试】识别完成回调: {message}")
+            # print(f"【调试】识别完成回调: {message}")
             result = json.loads(message)
             
             if 'payload' in result and 'result' in result['payload']:
                 final_text = result['payload']['result']
-                print(f"【调试】识别完成，最终结果: '{final_text}'")
+                # print(f"STT识别结果: '{final_text}' [最终结果]")
                 
                 # 添加到完整句子缓冲区
                 with self.sentences_lock:
@@ -444,8 +456,8 @@ class AliCloudSTTAdapter(STTClient):
                     last_different = not self.complete_sentences or self.complete_sentences[-1] != final_text
                     if last_different:
                         self.complete_sentences.append(final_text)
-                        sentences_count = len(self.complete_sentences)
-                        print(f"【调试】最终结果已添加到缓冲区，当前共 {sentences_count} 个句子")
+                        # sentences_count = len(self.complete_sentences)
+                        # print(f"【调试】最终结果已添加到缓冲区，当前共 {sentences_count} 个句子")
                 
                 # 更新当前文本和状态
                 self.current_text = final_text
@@ -473,24 +485,36 @@ class AliCloudSTTAdapter(STTClient):
         # 解析错误消息
         try:
             error_data = json.loads(message)
+            status_code = error_data.get("header", {}).get("status", 0)
             status_text = error_data.get("header", {}).get("status_text", "")
             
             # 检测是否为超时错误
-            if "timeout" in status_text.lower():
-                print("【调试】检测到超时错误，尝试自动重连")
+            if "timeout" in status_text.lower() or status_code == 40000000:
+                # print("【调试】检测到超时错误，尝试自动重连")
                 # 在事件循环中异步执行重连
                 asyncio.run_coroutine_threadsafe(self._reconnect(), self.loop)
+                
+                # 标记会话已结束，避免后续send_audio_chunk调用失败
+                if hasattr(self, 'transcriber'):
+                    try:
+                        # print("【调试】在错误回调中关闭transcriber")
+                        self.transcriber.shutdown()
+                    except Exception as e:
+                        print(f"【错误】关闭transcriber时出错: {e}")
+                    finally:
+                        self.transcriber = None
+            
         except Exception as e:
             print(f"【错误】解析错误消息失败: {e}")
         
         # 如果future还未完成，标记为发生异常
-        if not self.future.done():
+        if hasattr(self, 'future') and not self.future.done():
             error = Exception(f"语音识别错误: {message}")
-            print("【调试】通知future发生错误")
+            # print("【调试】通知future发生错误")
             self.loop.call_soon_threadsafe(self.future.set_exception, error)
             
         # 通知等待结果的协程继续执行
-        print("【调试】触发result_ready事件")
+        # print("【调试】触发result_ready事件")
         self.loop.call_soon_threadsafe(self._result_ready.set)
     
     def _on_close(self, *args: Any) -> None:
@@ -501,9 +525,9 @@ class AliCloudSTTAdapter(STTClient):
         Args:
             *args: 可能的参数
         """
-        print("【调试】识别连接已关闭")
+        # print("【调试】识别连接已关闭")
         # 通知等待结果的协程继续执行
-        print("【调试】触发result_ready事件")
+        # print("【调试】触发result_ready事件")
         self.loop.call_soon_threadsafe(self._result_ready.set)
 
     async def get_complete_sentences(self) -> list[str]:
@@ -528,7 +552,7 @@ class AliCloudSTTAdapter(STTClient):
         with self.sentences_lock:
             count = len(self.complete_sentences)
             self.complete_sentences = []
-            print(f"【调试】已清空句子缓冲区，清除了{count}个句子")
+            # print(f"【调试】已清空句子缓冲区，清除了{count}个句子")
             return count
 
     async def _reconnect(self) -> None:
@@ -560,17 +584,22 @@ class AliCloudSTTAdapter(STTClient):
                 saved_sentences = self.complete_sentences.copy()
             
             try:
-                # 关闭当前会话
+                # 确保当前会话已关闭
                 if self.transcriber:
                     try:
                         print("【调试】重连前关闭当前识别器")
                         self.transcriber.shutdown()
                     except Exception as e:
                         print(f"【错误】关闭识别器时出错: {e}")
-                    self.transcriber = None
+                    finally:
+                        self.transcriber = None
                 
                 # 等待一小段时间后再重连
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)  # 增加延迟，防止过快重连
+                
+                # 重置future和result_ready事件，准备新会话
+                self.future = self.loop.create_future()
+                self._result_ready.clear()
                 
                 # 启动新会话
                 print("【调试】开始重新启动语音识别会话")

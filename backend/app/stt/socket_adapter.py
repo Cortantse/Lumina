@@ -48,28 +48,28 @@ class SocketSTTHandler:
         self.is_windows = is_windows  # 是否为Windows系统
         
         if self.is_windows:
-            print("【调试】检测到Windows系统，使用TCP Socket")
+            # print("【调试】检测到Windows系统，使用TCP Socket")
             self.tcp_host = tcp_host
             self.tcp_port = tcp_port
             self.tcp_result_port = tcp_result_port
-            print(
-                f"【调试】初始化TCP Socket STT处理器: "
-                f"接收地址={tcp_host}:{tcp_port}, 结果地址={tcp_host}:{tcp_result_port}"
-            )
+            # print(
+            #     f"【调试】初始化TCP Socket STT处理器: "
+            #     f"接收地址={tcp_host}:{tcp_port}, 结果地址={tcp_host}:{tcp_result_port}"
+            # )
         else:
-            print("【调试】检测到UNIX系统，使用Unix Socket")
+            # print("【调试】检测到UNIX系统，使用Unix Socket")
             self.unix_socket_path = unix_socket_path
             self.unix_result_path = unix_result_path
-            print(
-                f"【调试】初始化Unix Socket STT处理器: "
-                f"socket_path={unix_socket_path}, result_path={unix_result_path}"
-            )
+            # print(
+            #     f"【调试】初始化Unix Socket STT处理器: "
+            #     f"socket_path={unix_socket_path}, result_path={unix_result_path}"
+            # )
             
             # 确保Unix Socket文件不存在
             for path in [self.unix_socket_path, self.unix_result_path]:
                 if os.path.exists(path):
                     os.remove(path)
-                    print(f"【调试】已移除旧的Socket文件: {path}")
+                    # print(f"【调试】已移除旧的Socket文件: {path}")
         
         # 当前STT会话
         self.session_active = False
@@ -78,7 +78,7 @@ class SocketSTTHandler:
         self.active_connections = {}
         self.audio_buffer: List[bytes] = []
         
-        print("【调试】Socket STT处理器初始化完成")
+        # print("【调试】Socket STT处理器初始化完成")
     
     async def start(self) -> None:
         """启动Socket服务器
@@ -91,13 +91,13 @@ class SocketSTTHandler:
             print("【警告】Socket服务器已在运行")
             return
             
-        print("【调试】启动Socket STT服务器")
+        # print("【调试】启动Socket STT服务器")
         self.running = True
         
         # 启动STT会话
         if await self.stt_client.start_session():
             self.session_active = True
-            print("【调试】语音识别会话启动成功")
+            # print("【调试】语音识别会话启动成功")
         else:
             print("【错误】语音识别会话启动失败")
             return
@@ -136,7 +136,7 @@ class SocketSTTHandler:
             server_socket.listen(5)
             server_socket.setblocking(False)
             
-            print(f"【调试】Unix音频接收Socket已启动: {self.unix_socket_path}")
+            # print(f"【调试】Unix音频接收Socket已启动: {self.unix_socket_path}")
             
             # 创建事件循环
             loop = asyncio.get_event_loop()
@@ -150,7 +150,7 @@ class SocketSTTHandler:
                     client_id = f"client_{len(self.active_connections) + 1}"
                     self.active_connections[client_id] = client
                     
-                    print(f"【调试】接受新的Unix Socket音频连接: {client_id}")
+                    # print(f"【调试】接受新的Unix Socket音频连接: {client_id}")
                     
                     # 为每个连接创建处理任务
                     asyncio.create_task(self._handle_audio_connection(client, client_id))
@@ -170,7 +170,7 @@ class SocketSTTHandler:
             if os.path.exists(self.unix_socket_path):
                 os.remove(self.unix_socket_path)
                 
-            print("【调试】Unix音频接收Socket已关闭")
+            # print("【调试】Unix音频接收Socket已关闭")
     
     async def _create_tcp_audio_socket(self) -> None:
         """创建接收音频数据的TCP Socket（Windows平台）"""
@@ -187,7 +187,7 @@ class SocketSTTHandler:
             server_socket.listen(5)
             server_socket.setblocking(False)
             
-            print(f"【调试】TCP音频接收Socket已启动: {self.tcp_host}:{self.tcp_port}")
+            # print(f"【调试】TCP音频接收Socket已启动: {self.tcp_host}:{self.tcp_port}")
             
             # 创建事件循环
             loop = asyncio.get_event_loop()
@@ -201,13 +201,13 @@ class SocketSTTHandler:
                     client_id = f"client_{len(self.active_connections) + 1}"
                     self.active_connections[client_id] = client
                     
-                    print(f"【调试】接受新的TCP音频连接: {client_id}, 地址: {addr}")
+                    # print(f"【调试】接受新的TCP Socket音频连接: {client_id}")
                     
                     # 为每个连接创建处理任务
                     asyncio.create_task(self._handle_audio_connection(client, client_id))
                     
                 except Exception as e:
-                    print(f"【错误】接受TCP音频连接时出错: {e}")
+                    print(f"【错误】接受TCP Socket音频连接时出错: {e}")
                     await asyncio.sleep(0.1)  # 避免CPU占用过高
             
         except Exception as e:
@@ -216,13 +216,22 @@ class SocketSTTHandler:
             # 关闭服务器Socket
             if server_socket:
                 server_socket.close()
-            print("【调试】TCP音频接收Socket已关闭")
+                
+            # print("【调试】TCP音频接收Socket已关闭")
     
     async def _handle_audio_connection(self, client: socket.socket, client_id: str) -> None:
-        """处理单个音频连接"""
+        """处理音频数据连接，接收并处理音频数据
+        
+        Args:
+            client: 客户端Socket连接对象
+            client_id: 客户端标识符
+        """
         loop = asyncio.get_event_loop()
+        audio_buffer = bytearray()
+        total_bytes_received = 0
+        
         try:
-            print(f"【调试】开始处理客户端 {client_id} 的音频数据")
+            # print(f"【调试】开始处理音频连接 {client_id}")
             
             # 为此连接启动一个新的STT会话
             if not self.session_active:
@@ -244,7 +253,7 @@ class SocketSTTHandler:
                     
                     # 解析音频数据长度（样本数）
                     audio_length = struct.unpack("<I", length_bytes)[0]
-                    print(f"【调试】接收音频数据包，包含{audio_length}个样本 (共{audio_length * 2}字节)")
+                    # print(f"【调试】接收音频数据包，包含{audio_length}个样本 (共{audio_length * 2}字节)")
                     
                     # 直接读取音频数据（每个i16样本占2字节）
                     # 由于每批数据不大（通常为320个样本，即640字节），可以直接一次性读取
@@ -257,15 +266,31 @@ class SocketSTTHandler:
                     # 检查是否接收到完整数据
                     if len(audio_data) == audio_length * 2:
                         self.audio_chunk_count += 1
-                        print(f"【调试】成功接收数据包 #{self.audio_chunk_count}，处理{audio_length}个样本")
+                        # print(f"【调试】成功接收数据包 #{self.audio_chunk_count}，处理{audio_length}个样本")
+                        
+                        # 检查STT会话是否活跃，如果不活跃则重新启动
+                        if not self.session_active:
+                            print(f"【警告】检测到STT会话未活跃，尝试重新启动")
+                            if await self.stt_client.start_session():
+                                self.session_active = True
+                                print(f"【调试】STT会话重新启动成功")
+                            else:
+                                print(f"【错误】STT会话重新启动失败，跳过当前音频包")
+                                continue
                         
                         # 立即将音频数据发送到语音识别服务
-                        stt_audio_data = AudioData(data=audio_data)
-                        response = await self.stt_client.send_audio_chunk(stt_audio_data)
-                        
-                        # 如果有识别结果，发送到结果Socket
-                        if response and response.text:
-                            await self._send_result(response)
+                        try:
+                            stt_audio_data = AudioData(data=audio_data)
+                            response = await self.stt_client.send_audio_chunk(stt_audio_data)
+                            
+                            # 如果有识别结果，发送到结果Socket
+                            if response and response.text:
+                                await self._send_result(response)
+                        except RuntimeError as e:
+                            print(f"【错误】处理音频数据失败1: {e}")
+                            # 如果是因为会话未启动导致的错误，标记session_active为False以便下次重启
+                            if "语音识别会话未启动" in str(e):
+                                self.session_active = False
                     else:
                         print(
                             f"【警告】接收到不完整的音频数据: "
@@ -277,11 +302,12 @@ class SocketSTTHandler:
                     break
                     
                 except Exception as e:
-                    print(f"【错误】处理客户端 {client_id} 的音频数据失败: {e}")
-                    await asyncio.sleep(0.1)
-        
+                    print(f"【错误】连接 {client_id} 处理过程中出错: {e}")
+                    await asyncio.sleep(0.1)  # 避免CPU占用过高
+            
         except Exception as e:
-            print(f"【错误】处理客户端 {client_id} 连接时出错: {e}")
+            print(f"【错误】处理连接 {client_id} 时发生异常: {e}")
+            
         finally:
             # 关闭客户端连接
             if client_id in self.active_connections:
@@ -453,14 +479,18 @@ class SocketSTTHandler:
         
         # 结束STT会话并获取最终结果
         if self.session_active:
-            final_result = await self.stt_client.end_session()
-            self.session_active = False
-            
-            # 发送最终识别结果
-            if (final_result and final_result.text and 
-                    hasattr(self, 'result_client') and self.result_client):
-                await self._send_result(final_result)
-                print(f"【调试】已发送最终识别结果: '{final_result.text}'")
+            try:
+                final_result = await self.stt_client.end_session()
+                self.session_active = False
+                
+                # 发送最终识别结果
+                if (final_result and final_result.text and 
+                        hasattr(self, 'result_client') and self.result_client):
+                    await self._send_result(final_result)
+                    print(f"【调试】已发送最终识别结果: '{final_result.text}'")
+            except Exception as e:
+                print(f"【错误】结束STT会话时出错: {e}")
+                self.session_active = False
         
         # 关闭所有连接
         for client_id, client in list(self.active_connections.items()):

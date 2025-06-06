@@ -14,16 +14,16 @@
     <div class="controls">
       <button 
         :class="{ 'active': isActive }"
-        @click="toggleAudioCapture"
+        @click="() => toggleAudioCapture()"
       >
         {{ isActive ? '停止识别' : '开始识别' }}
       </button>
-      
+      <!-- 添加播放录音按钮 -->
       <button 
-        class="debug-toggle" 
-        @click="showDebugInfo = !showDebugInfo"
+        v-if="!isActive && (capturedSegmentsCount > 0 || hasGlobalRecording)"
+        @click="showPlaybackDialog = true"
       >
-        {{ showDebugInfo ? '隐藏调试信息' : '显示调试信息' }}
+        播放识别语音
       </button>
     </div>
 
@@ -50,47 +50,15 @@
       <button class="clear-history" @click="clearHistory">清空历史</button>
     </div>
     
-    <div class="vad-info" v-if="showDebugInfo">
-      <h4>调试信息</h4>
-      <p>当前状态: <span :class="{ 'speaking': isSpeaking }">{{ isSpeaking ? '说话中' : '未检测到语音' }}</span></p>
-      <p>帧处理: {{ processedFrames }}</p>
-      <p v-if="lastEventTime">上次事件: {{ lastEventTime }}</p>
-      <p v-if="currentMicrophoneId">当前麦克风ID: {{ currentMicrophoneId }}</p>
-      
-      <div class="debug-panel">
-        <div class="debug-stats">
-          <p>总音频帧数: {{ audioCapture?.frameCount || 0 }}</p>
-          <p>错误次数: {{ audioCapture?.errorCount || 0 }}</p>
-          <p>采样率: {{ sampleRate }}</p>
-          <p>音频上下文状态: {{ audioContextState }}</p>
-          <p>最近事件: {{ lastEventType }}</p>
-          
-          <div v-if="audioTrackInfo" class="track-info">
-            <h5>音频轨道信息</h5>
-            <pre>{{ JSON.stringify(audioTrackInfo, null, 2) }}</pre>
-          </div>
-          
-          <div v-if="errorLog.length > 0" class="error-log">
-            <h5>错误日志 (最近5条)</h5>
-            <ul>
-              <li v-for="(err, index) in errorLog" :key="index">
-                {{ err }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-    
     <!-- 对话框：是否播放录制的语音段 -->
     <div class="dialog-overlay" v-if="showPlaybackDialog">
       <div class="dialog-content">
         <h4>语音识别已停止</h4>
         <p v-if="capturedSegmentsCount > 0 && hasGlobalRecording">
-          检测到 {{ capturedSegmentsCount }} 个语音段和完整录音，请选择如何播放:
+          检测到 {{ capturedSegmentsCount }} 个语音识别段和完整录音，请选择如何播放:
         </p>
         <p v-else-if="capturedSegmentsCount > 0">
-          检测到 {{ capturedSegmentsCount }} 个语音段，是否播放录制的音频？
+          检测到 {{ capturedSegmentsCount }} 个语音识别段，是否播放识别的音频？
         </p>
         <p v-else-if="hasGlobalRecording">
           检测到录音数据，是否播放录制的音频？
@@ -102,7 +70,14 @@
             class="play-button" 
             @click="playRecordedSpeech"
           >
-            播放语音段
+            播放单个语音识别段
+          </button>
+          <button 
+            v-if="capturedSegmentsCount > 1"
+            class="play-combined-button" 
+            @click="playCombinedSpeech"
+          >
+            播放合并语音段
           </button>
           <button 
             v-if="hasGlobalRecording"
@@ -110,7 +85,7 @@
             @click="playGlobalRecording"
           >
             播放完整录音
-        </button>
+          </button>
         </div>
       </div>
     </div>
@@ -118,9 +93,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, getCurrentInstance, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, getCurrentInstance } from 'vue';
 import { AudioCaptureInterface, VadEventType } from '../types/audio-processor';
 import { invoke } from '@tauri-apps/api/core';
+
+// 组件标识
+const COMPONENT_NAME = 'RealTimeVad';
 
 // 状态变量
 const isSpeaking = ref(false);
@@ -137,6 +115,10 @@ const capturedSegmentsCount = ref(0);
 const hasGlobalRecording = ref(false);
 const currentMicrophoneId = ref<string | null>(null);
 
+// 资源控制相关变量
+const hasAudioControl = ref(false);
+// const pendingOperation: Function | null = null;
+
 // 语音识别相关状态
 const recognizedText = ref('');
 const isTextFinal = ref(true);
@@ -151,30 +133,96 @@ const audioCapture = app?.appContext.config.globalProperties.$audioCapture as Au
 // 检查全局状态的定时器引用
 let statusCheckInterval: number | null = null;
 
-// 计算属性
-const sampleRate = computed(() => {
-  return audioCapture?.context?.sampleRate || '未知';
-});
+// 请求音频控制权
+const requestAudioControl = async (): Promise<boolean> => {
+  try {
+    if (audioCapture) {
+      console.log(`[RealTimeVad] 请求音频控制权`);
+      const success = await audioCapture.requestAudioControl(COMPONENT_NAME);
+      hasAudioControl.value = success;
+      return success;
+    }
+    return false;
+  } catch (error) {
+    console.error('[RealTimeVad] 请求音频控制权失败:', error);
+    addErrorLog(`请求音频控制权失败: ${error}`);
+    return false;
+  }
+};
 
-const audioContextState = computed(() => {
-  return audioCapture?.context?.state || '未初始化';
-});
+// 监听资源释放请求
+const resourceReleaseHandler = (event: CustomEvent) => {
+  if (event.detail && event.detail.requestedBy) {
+    console.log(`[RealTimeVad] 收到来自 ${event.detail.requestedBy} 的资源释放请求`);
+    
+    // 如果正在使用音频资源，停止使用
+    if (isActive.value) {
+      console.log(`[RealTimeVad] 正在释放音频资源...`);
+      
+      // 停止VAD识别
+      toggleAudioCapture(true); // 强制停止
+      
+      // 更新状态
+      hasAudioControl.value = false;
+      statusText.value = `已释放音频控制权给 ${event.detail.requestedBy}`;
+    }
+  }
+};
+
+// 监听资源可用通知
+const resourceAvailableHandler = (event: CustomEvent) => {
+  if (event.detail && event.detail.availableFor === COMPONENT_NAME) {
+    console.log(`[RealTimeVad] 收到音频资源可用通知`);
+    hasAudioControl.value = true;
+    
+    // 如果有待处理的操作，可以在这里执行
+  }
+};
 
 // 监听麦克风变更事件
 function handleMicrophoneChanged(event: CustomEvent) {
   if (event.detail && event.detail.success) {
     const newMicrophoneId = event.detail.deviceId;
-    console.log("[RealTimeVad] 检测到麦克风变更:", newMicrophoneId);
+    const requestingComponent = event.detail.requestingComponent;
+    
+    console.log(`[RealTimeVad] 检测到麦克风变更: ${newMicrophoneId}, 请求组件: ${requestingComponent || '未知'}`);
     
     currentMicrophoneId.value = newMicrophoneId;
     
-    // 如果实时VAD已经激活，需要同步状态
-    if (isActive.value) {
-      console.log("[RealTimeVad] 正在同步麦克风变更...");
-      syncWithGlobalCapture();
+    // 如果是其他组件请求的麦克风变更，我们可能需要释放控制权
+    if (requestingComponent && requestingComponent !== COMPONENT_NAME) {
+      hasAudioControl.value = false;
+      
+      // 如果VAD处于活跃状态，停止它（避免在麦克风切换后继续运行）
+      if (isActive.value) {
+        console.log("[RealTimeVad] 麦克风由其他组件切换，停止VAD");
+        toggleAudioCapture(true); // 强制停止
+      }
+    }
+    
+    // 只同步状态，但不激活VAD
+    if (audioCapture) {
+      // 只更新状态，不要启动VAD
+      currentMicrophoneId.value = audioCapture.currentMicrophoneId;
+      hasAudioControl.value = audioCapture.currentComponent === COMPONENT_NAME;
     }
   }
 }
+
+// 监听音频捕获停止事件
+const audioCaptureStoppedHandler = (event: CustomEvent) => {
+  // 确保只有与当前组件相关的事件才处理
+  const stoppingComponent = event.detail?.component;
+  console.log(`[RealTimeVad] 收到音频捕获停止事件，停止组件: ${stoppingComponent}`);
+  
+  // 无论是哪个组件请求的停止，都确保VAD组件状态正确更新
+  if (isActive.value) {
+    console.log('[RealTimeVad] 音频捕获停止，同步更新VAD组件状态');
+    isActive.value = false;
+    statusText.value = '已停止';
+    hasAudioControl.value = false;
+  }
+};
 
 // 当其他组件改变全局捕获状态时，同步本组件状态
 onMounted(() => {
@@ -183,14 +231,21 @@ onMounted(() => {
   window.addEventListener('playback-completed', handlePlaybackCompleted as EventListener);
   // 添加麦克风变更事件监听
   window.addEventListener('microphone-changed', handleMicrophoneChanged as EventListener);
+  // 添加资源控制事件监听
+  window.addEventListener('audio-resource-release', resourceReleaseHandler as EventListener);
+  window.addEventListener('audio-resource-available', resourceAvailableHandler as EventListener);
+  // 添加音频捕获停止事件监听
+  window.addEventListener('audio-capture-stopped', audioCaptureStoppedHandler as EventListener);
   
-  // 初始化状态同步
+  // 初始化状态同步 - 只同步麦克风和控制状态，不激活VAD
   if (audioCapture) {
-    isActive.value = audioCapture.isInitialized;
+    // 确保VAD组件初始化时不会自动激活
+    isActive.value = false; // 始终将VAD状态设置为非活跃
+    statusText.value = '未启动';
+    
+    // 只同步麦克风ID和控制权状态
     currentMicrophoneId.value = audioCapture.currentMicrophoneId;
-    if (isActive.value) {
-      statusText.value = '监听中';
-    }
+    hasAudioControl.value = audioCapture.currentComponent === COMPONENT_NAME;
   }
   
   // 创建一个检查全局状态的定时器
@@ -202,13 +257,8 @@ onMounted(() => {
 // 同步与全局音频捕获的状态
 function syncWithGlobalCapture() {
   if (audioCapture) {
-    // 同步活跃状态
-    if (isActive.value !== audioCapture.isInitialized) {
-      console.log("[RealTimeVad] 全局捕获状态变化，同步状态", 
-                  { local: isActive.value, global: audioCapture.isInitialized });
-      isActive.value = audioCapture.isInitialized;
-      statusText.value = isActive.value ? '监听中' : '已停止';
-    }
+    // 只同步控制权状态和麦克风ID，不要同步活跃状态
+    // 这样可以确保切换麦克风后不会自动开始VAD
     
     // 同步麦克风ID
     if (currentMicrophoneId.value !== audioCapture.currentMicrophoneId) {
@@ -224,6 +274,19 @@ function syncWithGlobalCapture() {
         }
       }
     }
+    
+    // 同步控制权状态
+    hasAudioControl.value = audioCapture.currentComponent === COMPONENT_NAME;
+    
+    // 如果全局捕获已关闭，但组件状态仍为活跃，则更新状态
+    // 这确保了在其他组件停止捕获时，VAD组件状态正确更新
+    if (!audioCapture.isInitialized && isActive.value) {
+      console.log("[RealTimeVad] 全局捕获已停止，更新VAD状态为非活跃");
+      isActive.value = false;
+      statusText.value = '已停止';
+    }
+    
+    // 重要：不再同步活跃状态，这样可以防止麦克风切换后自动开始VAD
   }
 }
 
@@ -236,7 +299,7 @@ function handlePlaybackCompleted() {
 // 组件卸载时清理
 onUnmounted(() => {
   if (isActive.value && audioCapture) {
-    audioCapture.stop();
+    audioCapture.stop(COMPONENT_NAME);
   }
   
   // 移除事件监听器
@@ -244,68 +307,101 @@ onUnmounted(() => {
   window.removeEventListener('stt-result', handleSttResult as EventListener);
   window.removeEventListener('playback-completed', handlePlaybackCompleted as EventListener);
   window.removeEventListener('microphone-changed', handleMicrophoneChanged as EventListener);
+  window.removeEventListener('audio-resource-release', resourceReleaseHandler as EventListener);
+  window.removeEventListener('audio-resource-available', resourceAvailableHandler as EventListener);
+  window.removeEventListener('audio-capture-stopped', audioCaptureStoppedHandler as EventListener);
   
   // 清理状态检查定时器
   if (statusCheckInterval !== null) {
     clearInterval(statusCheckInterval);
     statusCheckInterval = null;
   }
+  
+  // 如果当前组件有控制权，则释放
+  if (hasAudioControl.value && audioCapture) {
+    audioCapture.releaseAudioControl(COMPONENT_NAME);
+  }
 });
 
 // 开始/停止音频捕获
-async function toggleAudioCapture() {
+async function toggleAudioCapture(forceStop: boolean = false) {
   if (!audioCapture) {
     addErrorLog('无法获取音频捕获实例');
     return;
   }
   
   try {
-    if (isActive.value) {
-      // 停止捕获前先检查是否有语音段可以播放
+    if (isActive.value || forceStop) {
+      // 记录正在停止识别
+      console.log("[RealTimeVad] 正在停止语音识别...");
+      statusText.value = '正在停止...';
+      
       try {
-        // 停止全局缓存录音
-        audioCapture.stopRecording();
+        // 1. 首先确保停止Rust后端处理
+        await invoke('stop_vad_processing').catch(e => {
+          console.error('停止VAD处理时出错:', e);
+          addErrorLog('停止VAD处理失败，尝试继续清理资源');
+        });
         
-        // 获取全局缓存的录音时长
+        // 2. 停止全局缓存录音
+        if (audioCapture.isRecording) {
+          audioCapture.stopRecording(COMPONENT_NAME);
+        }
+        
+        // 3. 获取全局缓存的录音时长（如果有）
         const recordingDuration = audioCapture.getRecordingDuration();
         const hasRecordedAudio = recordingDuration > 0;
         
-        // 获取语音段
-        const segments = await invoke<any[]>('get_speech_segments');
+        // 4. 尝试获取语音段
+        let segments = [];
+        try {
+          segments = await invoke<any[]>('get_speech_segments');
+        } catch (e) {
+          console.error('获取语音段失败:', e);
+        }
         capturedSegmentsCount.value = segments ? segments.length : 0;
         
-      // 停止捕获
-      audioCapture.stop();
-      isActive.value = false;
-      statusText.value = '已停止';
-      processedFrames.value = 0;
+        // 5. 停止捕获并释放资源
+        console.log("[RealTimeVad] 停止音频捕获并释放资源");
+        audioCapture.stop(COMPONENT_NAME);
         
-      // 保存最后的识别结果到历史
-      if (recognizedText.value) {
-        textHistory.value.unshift(recognizedText.value);
-        // 限制历史记录数量
-        if (textHistory.value.length > 10) {
-          textHistory.value = textHistory.value.slice(0, 10);
+        // 6. 更新状态
+        isActive.value = false;
+        statusText.value = '已停止';
+        processedFrames.value = 0;
+        hasAudioControl.value = false;
+          
+        // 7. 保存最后的识别结果到历史
+        if (recognizedText.value) {
+          textHistory.value.unshift(recognizedText.value);
+          // 限制历史记录数量
+          if (textHistory.value.length > 10) {
+            textHistory.value = textHistory.value.slice(0, 10);
+          }
         }
-      }
+          
+        // 8. 清空识别结果
+        recognizedText.value = '';
+        console.log("[RealTimeVad] 停止识别完成，全局音频捕获已停止");
+          
+        // 9. 更新状态，但不自动显示播放对话框
+        hasGlobalRecording.value = hasRecordedAudio;
         
-      // 清空识别结果
-      recognizedText.value = '';
-        console.log("[RealTimeVad] 停止识别，全局音频捕获已停止");
-        
-        // 显示播放对话框条件：有语音段或有录音
-        if (capturedSegmentsCount.value > 0 || hasRecordedAudio) {
-          showPlaybackDialog.value = true;
-          hasGlobalRecording.value = hasRecordedAudio;
+        if (capturedSegmentsCount.value > 0) {
+          console.log(`[RealTimeVad] 检测到${capturedSegmentsCount.value}个VAD语音段可供播放`);
+          statusText.value = `检测到${capturedSegmentsCount.value}个语音段，可点击播放按钮回放`;
         }
       } catch (error) {
         console.error('获取语音段信息失败:', error);
         
         // 即使获取语音段失败，也要停止捕获
-        audioCapture.stopRecording();
-        audioCapture.stop();
+        if (audioCapture.isRecording) {
+          audioCapture.stopRecording(COMPONENT_NAME);
+        }
+        audioCapture.stop(COMPONENT_NAME);
         isActive.value = false;
         statusText.value = '已停止';
+        hasAudioControl.value = false;
         
         // 保存最后的识别结果到历史
         if (recognizedText.value) {
@@ -314,18 +410,33 @@ async function toggleAudioCapture() {
         recognizedText.value = '';
       }
     } else {
+      // 请求音频控制权
+      const controlSuccess = await requestAudioControl();
+      if (!controlSuccess) {
+        statusText.value = '无法获取音频控制权，请先停止其他语音组件';
+        addErrorLog('无法获取音频控制权');
+        return;
+      }
+      
       // 开始捕获
       // 使用当前选择的麦克风ID（如果有的话）
       const microphoneId = audioCapture.currentMicrophoneId;
       console.log("[RealTimeVad] 使用麦克风启动音频捕获:", microphoneId);
       
-      await audioCapture.init(microphoneId || undefined);
+      await audioCapture.init(microphoneId || undefined, COMPONENT_NAME);
       // 开始全局缓存录音
-      audioCapture.startRecording();
+      audioCapture.startRecording(COMPONENT_NAME);
+      
+      // 重置Rust端处理状态
+      await invoke('reset_vad_state').catch(e => {
+        console.error('重置VAD状态失败:', e);
+        addErrorLog('重置VAD状态失败');
+      });
       
       isActive.value = true;
       statusText.value = '监听中';
       currentMicrophoneId.value = audioCapture.currentMicrophoneId; // 更新当前麦克风ID
+      hasAudioControl.value = true;
       
       // 获取音频轨道信息
       if (audioCapture.stream) {
@@ -341,6 +452,7 @@ async function toggleAudioCapture() {
     console.error('音频捕获错误:', error);
     addErrorLog(`音频捕获错误: ${errorMessage}`);
     statusText.value = '错误';
+    hasAudioControl.value = false;
   }
 }
 
@@ -349,16 +461,25 @@ async function playRecordedSpeech() {
   showPlaybackDialog.value = false;
   
   try {
+    // 尝试获取语音段
+    const segments = await invoke<any[]>('get_speech_segments');
+    
+    if (!segments || segments.length === 0) {
+      statusText.value = '没有找到语音识别段';
+      console.log("[RealTimeVad] 没有可用的语音识别段");
+      return;
+    }
+    
+    console.log(`[RealTimeVad] 找到${segments.length}个语音识别段，发送播放请求`);
+    
     // 发布全局事件通知 VadPlayback 组件播放语音段
     window.dispatchEvent(new CustomEvent('play-speech-segments'));
     
-    // 如果您想直接从这里调用 VadPlayback 的方法，可以使用以下代码
-    // await invoke('get_speech_segments') 这会在RealTimeVad组件中直接获取和播放语音段
-    
-    console.log("[RealTimeVad] 已触发语音段播放事件");
+    statusText.value = `正在播放${segments.length}个语音识别段...`;
   } catch (error) {
-    console.error('播放语音段失败:', error);
-    addErrorLog(`播放语音段失败: ${error}`);
+    console.error('获取/播放语音识别段失败:', error);
+    addErrorLog(`播放语音识别段失败: ${error}`);
+    statusText.value = '播放语音识别段失败';
   }
 }
 
@@ -369,7 +490,7 @@ async function playGlobalRecording() {
   try {
     // 直接调用全局音频捕获接口的播放方法
     if (audioCapture) {
-      const success = await audioCapture.playRecordedAudio();
+      const success = await audioCapture.playRecordedAudio(COMPONENT_NAME);
       if (success) {
         statusText.value = '正在播放录音...';
       } else {
@@ -384,6 +505,33 @@ async function playGlobalRecording() {
   } catch (error) {
     console.error('播放全局录音失败:', error);
     addErrorLog(`播放全局录音失败: ${error}`);
+  }
+}
+
+// 播放合并后的语音段
+async function playCombinedSpeech() {
+  showPlaybackDialog.value = false;
+  
+  try {
+    // 尝试获取语音段总数
+    const segments = await invoke<any[]>('get_speech_segments');
+    
+    if (!segments || segments.length === 0) {
+      statusText.value = '没有找到语音识别段';
+      console.log("[RealTimeVad] 没有可用的语音识别段");
+      return;
+    }
+    
+    console.log(`[RealTimeVad] 找到${segments.length}个语音识别段，发送合并播放请求`);
+    
+    // 发布全局事件通知 VadPlayback 组件播放合并语音段
+    window.dispatchEvent(new CustomEvent('play-combined-speech-segments'));
+    
+    statusText.value = `正在播放合并后的语音识别段...`;
+  } catch (error) {
+    console.error('获取/播放合并语音段失败:', error);
+    addErrorLog(`播放合并语音段失败: ${error}`);
+    statusText.value = '播放合并语音段失败';
   }
 }
 
@@ -731,6 +879,15 @@ function addErrorLog(message: string) {
   background-color: #3367d6;
 }
 
+.dialog-buttons .play-combined-button {
+  background-color: #673ab7;
+  color: white;
+}
+
+.dialog-buttons .play-combined-button:hover {
+  background-color: #512da8;
+}
+
 @keyframes pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
@@ -814,6 +971,14 @@ function addErrorLog(message: string) {
   .cancel-button {
     background-color: #424242;
     color: #eee;
+  }
+  
+  .dialog-buttons .play-combined-button {
+    background-color: #7e57c2;
+  }
+  
+  .dialog-buttons .play-combined-button:hover {
+    background-color: #673ab7;
   }
 }
 </style> 
