@@ -453,8 +453,8 @@ class SocketSTTHandler:
             return
             
         try:
-            print(f"【调试】向客户端发送识别结果: "
-                  f"'{response.text}' (是否最终结果: {response.is_final})")
+            # print(f"【调试】向客户端发送识别结果: "
+            #       f"'{response.text}' (是否最终结果: {response.is_final})")
             loop = asyncio.get_event_loop()
             
             # 将识别结果转换为JSON格式
@@ -466,7 +466,7 @@ class SocketSTTHandler:
             # 发送识别结果
             await loop.sock_sendall(self.result_client, result_json)
             
-            print(f"【调试】已发送识别结果: '{response.text}' (是否最终结果: {response.is_final})")
+            # print(f"【调试】已发送识别结果: '{response.text}' (是否最终结果: {response.is_final})")
         except Exception as e:
             print(f"【错误】发送识别结果失败: {e}")
             # 如果发送失败，可能是接收器断开连接，重置result_client

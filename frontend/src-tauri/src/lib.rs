@@ -21,8 +21,8 @@ use std::io::{Write, Read};
 
 // 常量定义
 const SAMPLE_RATE: u32 = 16000; // 16kHz
-const FRAME_DURATION_MS: u32 = 20; // 20ms
-const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE * FRAME_DURATION_MS / 1000) as usize;
+// const FRAME_DURATION_MS: u32 = 20; // 20ms
+// const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE * FRAME_DURATION_MS / 1000) as usize;
 #[cfg(unix)]
 const SOCKET_PATH: &str = "/tmp/lumina_stt.sock";
 #[cfg(windows)]
@@ -316,11 +316,13 @@ impl SocketManager {
         success
     }
 
+    #[allow(dead_code)]
     // 获取所有存储的完整语音段
     fn get_complete_speech_segments(&self) -> Vec<Vec<i16>> {
         self.complete_speech_segments.clone()
     }
-
+    
+    #[allow(dead_code)]
     // 清空存储的语音段
     fn clear_complete_speech_segments(&mut self) {
         self.complete_speech_segments.clear();
@@ -496,7 +498,7 @@ impl VadProcessor {
             if self.is_speaking {
                 // println!("[调试] 检测到静音 (累计静音帧: {}), is_speaking: {}", self.silence_frames, self.is_speaking);
             }
-            if self.silence_frames >= 30 && self.is_speaking {
+            if self.silence_frames >= 50 && self.is_speaking {
                 self.is_speaking = false;
                 // println!("[重要] ====== 检测到语音结束 (累计静音帧: {}) ======", self.silence_frames);
                 event = VadEvent::SpeechEnd;
