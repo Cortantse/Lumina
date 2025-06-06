@@ -27,7 +27,7 @@ async def main():
     client = MiniMaxTTSClient(api_key)
     sample_text = "这是一个示例，演示如何边拿文字边播放音频。"
 
-    await play_streaming_tts(client, TTSApiEmotion.HAPPY, sample_text)
+    await play_streaming_tts(client, TTSApiEmotion.NEUTRAL, sample_text)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -22,6 +22,26 @@ export interface AudioFrameEvent {
 }
 
 /**
+ * 麦克风设备信息
+ */
+export interface MicrophoneDevice {
+  /**
+   * 设备ID
+   */
+  deviceId: string;
+  
+  /**
+   * 设备名称
+   */
+  label: string;
+  
+  /**
+   * 是否为默认设备
+   */
+  isDefault: boolean;
+}
+
+/**
  * 表示音频捕获器状态和功能
  */
 export interface AudioCaptureInterface {
@@ -62,14 +82,109 @@ export interface AudioCaptureInterface {
   errorCount: number;
   
   /**
-   * 初始化音频捕获
+   * 缓存的音频帧
    */
-  init(): Promise<void>;
+  cachedAudioFrames: Float32Array[];
+  
+  /**
+   * 是否正在录音
+   */
+  isRecording: boolean;
+  
+  /**
+   * 实时播放用的音频源节点
+   */
+  audioBufferSource: AudioBufferSourceNode | null;
+  
+  /**
+   * 实时播放用的增益节点
+   */
+  directPlaybackNode: GainNode | null;
+  
+  /**
+   * 是否启用实时播放
+   */
+  isDirectPlaybackEnabled: boolean;
+  
+  /**
+   * 实时播放缓冲区
+   */
+  realtimePlaybackBuffer: Float32Array[];
+  
+  /**
+   * 实时播放缓冲区大小（帧数）
+   */
+  realtimePlaybackBufferSize: number;
+  
+  /**
+   * 是否已安排播放（避免重叠播放）
+   */
+  isPlaybackScheduled: boolean;
+  
+  /**
+   * 当前选择的麦克风设备ID
+   */
+  currentMicrophoneId: string | null;
+  
+  /**
+   * 初始化音频捕获
+   * @param deviceId 可选，指定使用的麦克风设备ID
+   */
+  init(deviceId?: string): Promise<void>;
+  
+  /**
+   * 获取可用的麦克风设备列表
+   */
+  getAvailableMicrophones(): Promise<MicrophoneDevice[]>;
+  
+  /**
+   * 切换到指定的麦克风设备
+   * @param deviceId 麦克风设备ID
+   */
+  switchMicrophone(deviceId: string): Promise<boolean>;
   
   /**
    * 停止音频捕获
    */
   stop(): void;
+  
+  /**
+   * 开始录音，缓存音频帧
+   */
+  startRecording(): void;
+  
+  /**
+   * 停止录音
+   */
+  stopRecording(): void;
+  
+  /**
+   * 播放缓存的音频
+   */
+  playRecordedAudio(): Promise<boolean>;
+  
+  /**
+   * 获取录音时长（秒）
+   */
+  getRecordingDuration(): number;
+  
+  /**
+   * 清空缓存的录音
+   */
+  clearRecordedAudio(): void;
+  
+  /**
+   * 切换实时播放状态
+   * @param enable 可选，直接指定是否启用，不传则切换当前状态
+   * @returns 切换后的状态
+   */
+  toggleDirectPlayback(enable?: boolean): boolean;
+  
+  /**
+   * 设置实时播放缓冲区大小
+   * @param frames 缓冲区大小（帧数）
+   */
+  setRealtimeBufferSize(frames: number): void;
 }
 
 /**

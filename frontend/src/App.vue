@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import RealTimeVad from "./components/RealTimeVad.vue";
+import VadPlayback from "./components/VadPlayback.vue";
 
 const greetMsg = ref("");
 const name = ref("");
@@ -22,6 +23,10 @@ async function greet() {
       <RealTimeVad />
     </div>
 
+    <div class="feature-section">
+      <h2>VAD语音段回放</h2>
+      <VadPlayback />
+    </div>
 
     <div class="feature-section">
       <h2>基础录音与回放</h2>

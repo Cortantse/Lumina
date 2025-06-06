@@ -29,6 +29,8 @@ class PipelineService:
         self.stt_client = AliCloudSTTAdapter(config=stt_config)  # 初始化阿里云语音识别客户端
         self.running = False  # 服务运行状态标志
         self.text_callbacks: List[Callable[[str, bool], Any]] = []  # 文本回调函数列表
+        self.last_response_text = ""  # 用于存储上一次处理过的识别文本，避免重复处理
+        self.last_response_id = ""  # 用于存储上一次处理过的识别结果ID
         
         # 设置默认TTS API密钥 (过长的API密钥已被简化处理)
         if not tts_api_key:
@@ -108,8 +110,24 @@ class PipelineService:
             # print(f"【调试】处理音频数据，大小: {len(audio_data.data)}字节")
             response = await self.stt_client.send_audio_chunk(audio_data)
             
-            # 如果有识别结果，触发所有注册的回调函数
+            # 如果有识别结果，检查是否与上次结果相同，避免重复处理
             if response and response.text:
+                # 生成结果唯一标识（使用文本和是否最终结果状态）
+                response_id = f"{response.text}_{response.is_final}"
+                
+                # 检查是否与上次处理过的结果相同
+                if response_id == self.last_response_id:
+                    # 如果是最终结果，忽略重复的最终结果
+                    if response.is_final:
+                        return response
+                    # 如果不是最终结果，也忽略重复的中间结果
+                    if response.text == self.last_response_text:
+                        return response
+                
+                # 更新最后处理过的结果
+                self.last_response_text = response.text
+                self.last_response_id = response_id
+                
                 print(f"【调试】收到识别结果: '{response.text}', 是否最终结果: {response.is_final}")
                 for callback in self.text_callbacks:
                     # 使用create_task异步执行回调，避免阻塞

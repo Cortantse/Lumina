@@ -7,8 +7,32 @@
       <button @click="playRecordedAudio" :disabled="!hasRecordedAudio || isRecording">
         播放录音
       </button>
-      <button @click="downloadRecordedAudio" :disabled="!hasRecordedAudio">
-        下载录音
+      <button v-if="debug" @click="toggleGlobalCapture" :class="{ active: isGlobalCapturing }">
+        {{ isGlobalCapturing ? '停止全局捕获' : '开始全局捕获' }}
+      </button>
+    </div>
+
+    <div class="options">
+      <label class="auto-play-option">
+        <input type="checkbox" v-model="autoPlayAfterRecording">
+        录音结束后自动播放
+      </label>
+    </div>
+
+    <div class="microphone-selector">
+      <label for="microphone-select">选择麦克风：</label>
+      <select 
+        id="microphone-select" 
+        v-model="selectedMicrophoneId"
+        @change="onMicrophoneChange"
+        :disabled="isRecording"
+      >
+        <option v-for="mic in availableMicrophones" :key="mic.deviceId" :value="mic.deviceId">
+          {{ mic.label }} {{ mic.isDefault ? '(默认)' : '' }}
+        </option>
+      </select>
+      <button class="refresh-button" @click="refreshMicrophoneList" :disabled="isRecording">
+        刷新
       </button>
     </div>
 
@@ -19,27 +43,139 @@
       <div v-if="recognizedText" class="text-result">
         <p>识别结果: {{ recognizedText }}</p>
       </div>
+      <div v-if="debug" class="debug-info">
+        <p>录音状态: {{ isRecording ? '录音中' : '未录音' }}</p>
+        <p>全局捕获: {{ isGlobalCapturing ? '已启动' : '已停止' }}</p>
+        <p>自动播放: {{ autoPlayAfterRecording ? '已启用' : '已禁用' }}</p>
+        <p>当前麦克风: {{ getCurrentMicrophoneName() }}</p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue';
+import { ref, onUnmounted, onMounted, getCurrentInstance } from 'vue';
+import { AudioCaptureInterface, MicrophoneDevice } from '../types/audio-processor';
+
+// 获取全局音频捕获接口
+const app = getCurrentInstance();
+const audioCapture = app?.appContext.config.globalProperties.$audioCapture as AudioCaptureInterface;
 
 // 状态变量
 const isRecording = ref(false);
 const hasRecordedAudio = ref(false);
 const recognizedText = ref('');
 const connectionStatus = ref('');
+const isGlobalCapturing = ref(false);
+// 调试模式开关
+const debug = ref(false); // 设置为true可以显示调试信息
+// 自动播放开关
+const autoPlayAfterRecording = ref(true); // 默认开启自动播放
+
+// 麦克风相关状态
+const availableMicrophones = ref<MicrophoneDevice[]>([]);
+const selectedMicrophoneId = ref<string>('');
+const isMicrophoneLoading = ref(false);
 
 // 音频相关变量
-let audioContext: AudioContext | null = null;
-let mediaStream: MediaStream | null = null;
-let audioWorklet: AudioWorkletNode | null = null;
 let socket: WebSocket | null = null;
 let recordedChunks: Int16Array[] = [];
 let audioBuffer: AudioBuffer | null = null;
 let heartbeatInterval: number | null = null;
+let originalOnmessage: ((event: MessageEvent<any>) => void) | null = null;
+
+// 监听 STT 结果
+const sttResultListener = (event: CustomEvent) => {
+  if (event.detail && event.detail.text) {
+    recognizedText.value = event.detail.text;
+  }
+};
+
+// 监听录音完成事件
+const recordingCompletedListener = (event: CustomEvent) => {
+  if (autoPlayAfterRecording.value) {
+    // 短暂延迟后播放，确保录音已完全处理
+    setTimeout(() => {
+      playRecordedAudio();
+    }, 500);
+  }
+};
+
+// 获取可用麦克风列表
+const refreshMicrophoneList = async () => {
+  try {
+    isMicrophoneLoading.value = true;
+    connectionStatus.value = '正在获取麦克风列表...';
+    
+    const microphones = await audioCapture.getAvailableMicrophones();
+    availableMicrophones.value = microphones;
+    
+    // 如果没有选择过麦克风，默认选择第一个（通常是默认设备）
+    if (!selectedMicrophoneId.value && microphones.length > 0) {
+      // 优先选择默认设备
+      const defaultMic = microphones.find(mic => mic.isDefault);
+      selectedMicrophoneId.value = defaultMic?.deviceId || microphones[0].deviceId;
+    } else if (audioCapture.currentMicrophoneId) {
+      // 如果已有当前麦克风，使用它
+      selectedMicrophoneId.value = audioCapture.currentMicrophoneId;
+    }
+    
+    connectionStatus.value = `发现 ${microphones.length} 个麦克风设备`;
+  } catch (error) {
+    console.error('【错误】获取麦克风列表失败:', error);
+    connectionStatus.value = `获取麦克风列表失败: ${error}`;
+  } finally {
+    isMicrophoneLoading.value = false;
+  }
+};
+
+// 切换麦克风
+const onMicrophoneChange = async () => {
+  if (!selectedMicrophoneId.value) return;
+  
+  // 如果正在录音，先停止录音
+  if (isRecording.value) {
+    await stopRecording();
+  }
+  
+  connectionStatus.value = '正在切换麦克风...';
+  const success = await audioCapture.switchMicrophone(selectedMicrophoneId.value);
+  
+  if (success) {
+    connectionStatus.value = '麦克风切换成功';
+    isGlobalCapturing.value = true;
+    
+    // 发送全局麦克风切换事件，通知其他组件
+    window.dispatchEvent(new CustomEvent('microphone-changed', { 
+      detail: { 
+        deviceId: selectedMicrophoneId.value,
+        success: true 
+      } 
+    }));
+  } else {
+    connectionStatus.value = '麦克风切换失败';
+    // 恢复之前选择的麦克风
+    selectedMicrophoneId.value = audioCapture.currentMicrophoneId || '';
+  }
+};
+
+// 获取当前麦克风名称
+const getCurrentMicrophoneName = (): string => {
+  if (!audioCapture.currentMicrophoneId) return '未选择';
+  
+  const mic = availableMicrophones.value.find(m => m.deviceId === audioCapture.currentMicrophoneId);
+  return mic ? mic.label : `未知设备 (${audioCapture.currentMicrophoneId})`;
+};
+
+// 挂载时添加事件监听器
+onMounted(async () => {
+  window.addEventListener('stt-result', sttResultListener as EventListener);
+  window.addEventListener('recording-completed', recordingCompletedListener as EventListener);
+  isGlobalCapturing.value = audioCapture.isInitialized;
+  
+  // 加载麦克风列表
+  await refreshMicrophoneList();
+});
 
 // 初始化WebSocket连接
 const connectWebSocket = async (): Promise<boolean> => {
@@ -123,8 +259,16 @@ const connectWebSocket = async (): Promise<boolean> => {
 // 录音控制
 const toggleRecording = async () => {
   if (isRecording.value) {
-    stopRecording();
+    await stopRecording();
+    // 停止录音的同时停止全局捕获
+    if (isGlobalCapturing.value) {
+      await toggleGlobalCapture();
+    }
   } else {
+    // 开始录音前确保全局捕获已开启
+    if (!isGlobalCapturing.value) {
+      await toggleGlobalCapture();
+    }
     await startRecording();
   }
 };
@@ -143,64 +287,53 @@ const startRecording = async () => {
       return;
     }
     
-    // 初始化音频上下文
-    if (!audioContext) {
-      audioContext = new AudioContext({ sampleRate: 16000 });
-      
-      // 加载 AudioWorklet 处理器
-      await audioContext.audioWorklet.addModule('/audio-processor.js');
+    // 确保全局音频捕获已启动
+    if (!isGlobalCapturing.value) {
+      await audioCapture.init(selectedMicrophoneId.value || undefined);
+      isGlobalCapturing.value = true;
     }
     
-    // 获取麦克风权限
-    mediaStream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { 
-        echoCancellation: true,
-        noiseSuppression: true,
-        channelCount: 1,
-        sampleRate: 16000
-      } 
-    });
+    // 开始使用全局缓存录音
+    audioCapture.startRecording();
     
-    // 创建音频处理节点
-    const sourceNode = audioContext.createMediaStreamSource(mediaStream);
-    
-    // 创建并连接 AudioWorklet 节点
-    audioWorklet = new AudioWorkletNode(audioContext, 'audio-capture-processor');
-    
-    // 限制存储的最大数据量，防止内存溢出
-    const MAX_RECORDED_CHUNKS = 1800; // 约一分钟的数据(按每个块20ms计算)
-    
-    // 处理 AudioWorklet 发来的数据
-    audioWorklet.port.onmessage = (event) => {
-      if (!isRecording.value) return;
+    // 将音频数据处理器添加到全局处理
+    originalOnmessage = audioCapture.workletNode?.port.onmessage || null;
+    if (audioCapture.workletNode) {
+      const workletPort = audioCapture.workletNode.port;
       
-      const { type, audioData } = event.data;
-      
-      if (type === 'frame') {
-        // 转换为Int16
-        const pcmData = new Int16Array(audioData.length);
-        for (let i = 0; i < audioData.length; i++) {
-          pcmData[i] = Math.max(-1, Math.min(1, audioData[i])) * 0x7FFF;
+      workletPort.onmessage = function(event) {
+        // 调用原始处理器
+        if (originalOnmessage) {
+          originalOnmessage.call(this, event);
         }
         
-        // 存储数据用于回放，限制最大长度
-        recordedChunks.push(pcmData);
+        if (!isRecording.value) return;
         
-        // 如果数据量过大，移除最旧的数据
-        if (recordedChunks.length > MAX_RECORDED_CHUNKS) {
-          recordedChunks.shift();
+        if (event.data.type === 'frame') {
+          const { audioData } = event.data;
+          
+          // 转换为Int16
+          const pcmData = new Int16Array(audioData.length);
+          for (let i = 0; i < audioData.length; i++) {
+            pcmData[i] = Math.max(-1, Math.min(1, audioData[i])) * 0x7FFF;
+          }
+          
+          // 存储数据用于回放，限制最大长度
+          recordedChunks.push(pcmData);
+          
+          // 如果数据量过大，移除最旧的数据
+          const MAX_RECORDED_CHUNKS = 1800; // 约一分钟的数据(按每个块20ms计算)
+          if (recordedChunks.length > MAX_RECORDED_CHUNKS) {
+            recordedChunks.shift();
+          }
+          
+          // 发送到WebSocket
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(pcmData.buffer);
+          }
         }
-        
-        // 发送到WebSocket
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(pcmData.buffer);
-        }
-      }
-    };
-    
-    // 连接节点
-    sourceNode.connect(audioWorklet);
-    audioWorklet.connect(audioContext.destination);
+      };
+    }
     
     isRecording.value = true;
     connectionStatus.value = '正在录音...';
@@ -212,20 +345,18 @@ const startRecording = async () => {
   }
 };
 
-const stopRecording = (sendStopSignal = true) => {
+const stopRecording = async (sendStopSignal = true) => {
   if (isRecording.value) {
     isRecording.value = false;
     
-    // 停止媒体流
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      mediaStream = null;
-    }
+    // 停止全局缓存录音
+    audioCapture.stopRecording();
     
-    // 断开 AudioWorklet 节点
-    if (audioWorklet) {
-      audioWorklet.disconnect();
-      audioWorklet = null;
+    // 我们不停止全局音频捕获，只还原其处理方式
+    if (audioCapture.workletNode && originalOnmessage) {
+      // 恢复原始音频处理器的工作
+      audioCapture.workletNode.port.onmessage = originalOnmessage;
+      originalOnmessage = null;
     }
     
     // 如果有录音数据，标记为可播放
@@ -259,159 +390,147 @@ const stopRecording = (sendStopSignal = true) => {
 
 // 合并PCM数据块
 const combinePCMChunks = () => {
-  if (recordedChunks.length === 0 || !audioContext) return;
-  
-  // 计算总长度
-  let totalLength = 0;
-  for (const chunk of recordedChunks) {
-    totalLength += chunk.length;
+  if (recordedChunks.length === 0) {
+    console.log('【警告】没有录音数据可合并');
+    return;
   }
   
-  // 创建一个新的Int16Array
-  const combinedData = new Int16Array(totalLength);
-  
-  // 复制数据
-  let offset = 0;
-  for (const chunk of recordedChunks) {
-    combinedData.set(chunk, offset);
-    offset += chunk.length;
+  try {
+    // 计算总长度
+    let totalLength = 0;
+    for (const chunk of recordedChunks) {
+      totalLength += chunk.length;
+    }
+    
+    console.log(`【调试】开始合并${recordedChunks.length}个PCM数据块，总长度: ${totalLength}个样本`);
+    
+    // 创建一个新的Int16Array
+    const combinedData = new Int16Array(totalLength);
+    
+    // 复制数据
+    let offset = 0;
+    for (const chunk of recordedChunks) {
+      combinedData.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    // 转换回Float32Array用于AudioBuffer
+    const floatData = new Float32Array(combinedData.length);
+    for (let i = 0; i < combinedData.length; i++) {
+      floatData[i] = combinedData[i] / 0x7FFF;
+    }
+    
+    // 无论全局音频上下文是否可用，都创建一个AudioBuffer
+    // 我们在播放时会根据需要处理
+    const sampleRate = 16000; // 使用标准采样率
+    
+    // 创建一个新的本地AudioContext仅用于创建AudioBuffer
+    const tempCtx = new AudioContext({ sampleRate });
+    audioBuffer = tempCtx.createBuffer(1, floatData.length, sampleRate);
+    audioBuffer.getChannelData(0).set(floatData);
+    
+    // 不需要保持这个上下文开启
+    tempCtx.close();
+    
+    console.log(`【调试】成功合并PCM数据块，AudioBuffer长度: ${audioBuffer.duration.toFixed(2)}秒`);
+  } catch (error) {
+    console.error('【错误】合并PCM数据块失败:', error);
   }
-  
-  // 转换回Float32Array用于AudioBuffer
-  const floatData = new Float32Array(combinedData.length);
-  for (let i = 0; i < combinedData.length; i++) {
-    floatData[i] = combinedData[i] / 0x7FFF;
-  }
-  
-  // 创建AudioBuffer
-  audioBuffer = audioContext.createBuffer(1, floatData.length, audioContext.sampleRate);
-  audioBuffer.getChannelData(0).set(floatData);
-  
-  console.log(`【调试】已合并${recordedChunks.length}个PCM数据块，总长度: ${totalLength}个样本`);
 };
 
 // 播放录制的音频
-const playRecordedAudio = () => {
-  if (!audioBuffer || !audioContext) {
+const playRecordedAudio = async () => {
+  // 首先尝试播放全局缓存的音频
+  if (await audioCapture.playRecordedAudio()) {
+    connectionStatus.value = '正在播放全局缓存录音...';
+    return;
+  }
+  
+  // 如果没有全局缓存或播放失败，尝试播放本地缓存
+  if (!audioBuffer) {
     connectionStatus.value = '没有可播放的录音';
     return;
   }
   
-  connectionStatus.value = '正在播放录音...';
+  connectionStatus.value = '正在播放本地缓存录音...';
   
-  const source = audioContext.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(audioContext.destination);
-  source.onended = () => {
-    connectionStatus.value = '播放结束';
-  };
-  source.start(0);
+  try {
+    // 如果音频上下文已关闭，需要重新创建一个临时上下文用于播放
+    let tempContext = null;
+    let audioCtx = null;
+    
+    if (!audioCapture.context || audioCapture.context.state === 'closed') {
+      console.log('【调试】全局音频上下文已关闭，创建临时上下文用于播放');
+      tempContext = new AudioContext({ sampleRate: 16000 });
+      audioCtx = tempContext;
+    } else {
+      audioCtx = audioCapture.context;
+    }
+    
+    // 如果需要，在临时上下文中重新创建AudioBuffer
+    let bufferToPlay = audioBuffer;
+    if (tempContext && audioBuffer) {
+      // 创建一个新的AudioBuffer，将原始数据复制到新缓冲区
+      bufferToPlay = tempContext.createBuffer(
+        audioBuffer.numberOfChannels,
+        audioBuffer.length,
+        audioBuffer.sampleRate
+      );
+      
+      // 复制声道数据
+      for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+        const newChannelData = bufferToPlay.getChannelData(channel);
+        const originalChannelData = audioBuffer.getChannelData(channel);
+        newChannelData.set(originalChannelData);
+      }
+    }
+    
+    // 创建音源节点并连接到输出
+    const source = audioCtx.createBufferSource();
+    source.buffer = bufferToPlay;
+    source.connect(audioCtx.destination);
+    
+    // 播放结束事件
+    source.onended = () => {
+      connectionStatus.value = '播放结束';
+      // 如果使用了临时上下文，播放结束后关闭它
+      if (tempContext) {
+        tempContext.close();
+      }
+    };
+    
+    // 启动播放
+    source.start(0);
+    console.log('【调试】开始播放录音，长度:', bufferToPlay.duration);
+  } catch (error) {
+    console.error('【错误】播放录音失败:', error);
+    connectionStatus.value = `播放失败: ${error}`;
+  }
 };
 
-// 下载录制的音频
-const downloadRecordedAudio = () => {
-  if (!audioBuffer || !audioContext) {
-    connectionStatus.value = '没有可下载的录音';
-    return;
+// 启动或停止全局音频捕获
+const toggleGlobalCapture = async () => {
+  try {
+    if (isGlobalCapturing.value) {
+      // 如果当前正在录音，先停止录音
+      if (isRecording.value) {
+        await stopRecording(true);
+      }
+      
+      // 停止全局音频捕获
+      audioCapture.stop();
+      isGlobalCapturing.value = false;
+      connectionStatus.value = '已停止全局音频捕获';
+    } else {
+      // 初始化并启动全局音频捕获
+      await audioCapture.init(selectedMicrophoneId.value || undefined);
+      isGlobalCapturing.value = true;
+      connectionStatus.value = '全局音频捕获已启动，可以开始录音';
+    }
+  } catch (error) {
+    console.error('【错误】切换全局音频捕获状态失败:', error);
+    connectionStatus.value = `操作失败: ${error}`;
   }
-  
-  // 导出为WAV文件
-  const wavBuffer = createWavFile(audioBuffer);
-  
-  // 创建下载链接
-  const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-  const url = URL.createObjectURL(blob);
-  
-  const a = document.createElement('a');
-  a.style.display = 'none';
-  a.href = url;
-  a.download = `录音_${new Date().toISOString()}.wav`;
-  document.body.appendChild(a);
-  a.click();
-  
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 100);
-};
-
-// 创建WAV文件
-const createWavFile = (buffer: AudioBuffer): ArrayBuffer => {
-  const numChannels = 1;
-  const sampleRate = buffer.sampleRate;
-  const bitsPerSample = 16;
-  const bytesPerSample = bitsPerSample / 8;
-  const channelData = buffer.getChannelData(0);
-  
-  // PCM数据长度 (字节)
-  const dataLength = channelData.length * bytesPerSample;
-  
-  // WAV文件头长度
-  const headerLength = 44;
-  const wavBuffer = new ArrayBuffer(headerLength + dataLength);
-  const view = new DataView(wavBuffer);
-  
-  // WAV头
-  // "RIFF"
-  view.setUint8(0, 0x52);
-  view.setUint8(1, 0x49);
-  view.setUint8(2, 0x46);
-  view.setUint8(3, 0x46);
-  
-  // 文件大小
-  view.setUint32(4, 36 + dataLength, true);
-  
-  // "WAVE"
-  view.setUint8(8, 0x57);
-  view.setUint8(9, 0x41);
-  view.setUint8(10, 0x56);
-  view.setUint8(11, 0x45);
-  
-  // "fmt "子块
-  view.setUint8(12, 0x66);
-  view.setUint8(13, 0x6D);
-  view.setUint8(14, 0x74);
-  view.setUint8(15, 0x20);
-  
-  // 子块大小
-  view.setUint32(16, 16, true);
-  
-  // 音频格式 (1表示PCM)
-  view.setUint16(20, 1, true);
-  
-  // 声道数
-  view.setUint16(22, numChannels, true);
-  
-  // 采样率
-  view.setUint32(24, sampleRate, true);
-  
-  // 字节率: SampleRate * NumChannels * BitsPerSample/8
-  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
-  
-  // 块对齐: NumChannels * BitsPerSample/8
-  view.setUint16(32, numChannels * bytesPerSample, true);
-  
-  // 每个样本的位数
-  view.setUint16(34, bitsPerSample, true);
-  
-  // "data"子块
-  view.setUint8(36, 0x64);
-  view.setUint8(37, 0x61);
-  view.setUint8(38, 0x74);
-  view.setUint8(39, 0x61);
-  
-  // 数据大小
-  view.setUint32(40, dataLength, true);
-  
-  // 写入PCM数据
-  const samples = new Int16Array(channelData.length);
-  for (let i = 0; i < channelData.length; i++) {
-    // 将Float32转换为Int16
-    samples[i] = Math.max(-1, Math.min(1, channelData[i])) * 0x7FFF;
-    view.setInt16(headerLength + i * bytesPerSample, samples[i], true);
-  }
-  
-  return wavBuffer;
 };
 
 // 清理资源
@@ -433,11 +552,17 @@ onUnmounted(() => {
     heartbeatInterval = null;
   }
   
-  // 关闭音频上下文
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
+  // 移除事件监听器
+  window.removeEventListener('stt-result', sttResultListener as EventListener);
+  window.removeEventListener('recording-completed', recordingCompletedListener as EventListener);
+  
+  // 确保恢复原始处理器
+  if (audioCapture.workletNode && originalOnmessage) {
+    audioCapture.workletNode.port.onmessage = originalOnmessage;
+    originalOnmessage = null;
   }
+  
+  // 不再关闭音频上下文，因为它现在是全局管理的
 });
 </script>
 
@@ -458,6 +583,46 @@ onUnmounted(() => {
   gap: 10px;
   justify-content: center;
   width: 100%;
+}
+
+.options {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.microphone-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 15px;
+}
+
+.microphone-selector select {
+  flex-grow: 1;
+  padding: 8px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+.refresh-button {
+  padding: 8px;
+  background-color: #3498db;
+  border-radius: 5px;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background-color: #2980b9;
+}
+
+.auto-play-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
 }
 
 button {
@@ -487,6 +652,14 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.active {
+  background-color: #3498db;
+}
+
+button.active:hover {
+  background-color: #2980b9;
+}
+
 .status-info {
   width: 100%;
   text-align: center;
@@ -501,6 +674,13 @@ button:disabled {
 
 .text-result {
   padding: 15px;
+  background-color: #f0f8ff;
+  border-radius: 5px;
+  border-left: 4px solid #3498db;
+}
+
+.debug-info {
+  padding: 10px;
   background-color: #f0f8ff;
   border-radius: 5px;
   border-left: 4px solid #3498db;

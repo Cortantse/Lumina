@@ -55,6 +55,7 @@
       <p>当前状态: <span :class="{ 'speaking': isSpeaking }">{{ isSpeaking ? '说话中' : '未检测到语音' }}</span></p>
       <p>帧处理: {{ processedFrames }}</p>
       <p v-if="lastEventTime">上次事件: {{ lastEventTime }}</p>
+      <p v-if="currentMicrophoneId">当前麦克风ID: {{ currentMicrophoneId }}</p>
       
       <div class="debug-panel">
         <div class="debug-stats">
@@ -78,18 +79,48 @@
             </ul>
           </div>
         </div>
-        
-        <button class="copy-debug" @click="copyDebugInfo">
-          复制调试信息
+      </div>
+    </div>
+    
+    <!-- 对话框：是否播放录制的语音段 -->
+    <div class="dialog-overlay" v-if="showPlaybackDialog">
+      <div class="dialog-content">
+        <h4>语音识别已停止</h4>
+        <p v-if="capturedSegmentsCount > 0 && hasGlobalRecording">
+          检测到 {{ capturedSegmentsCount }} 个语音段和完整录音，请选择如何播放:
+        </p>
+        <p v-else-if="capturedSegmentsCount > 0">
+          检测到 {{ capturedSegmentsCount }} 个语音段，是否播放录制的音频？
+        </p>
+        <p v-else-if="hasGlobalRecording">
+          检测到录音数据，是否播放录制的音频？
+        </p>
+        <div class="dialog-buttons">
+          <button class="cancel-button" @click="showPlaybackDialog = false">取消</button>
+          <button 
+            v-if="capturedSegmentsCount > 0"
+            class="play-button" 
+            @click="playRecordedSpeech"
+          >
+            播放语音段
+          </button>
+          <button 
+            v-if="hasGlobalRecording"
+            class="play-button" 
+            @click="playGlobalRecording"
+          >
+            播放完整录音
         </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, getCurrentInstance, computed } from 'vue';
+import { ref, onMounted, onUnmounted, getCurrentInstance, computed, watch } from 'vue';
 import { AudioCaptureInterface, VadEventType } from '../types/audio-processor';
+import { invoke } from '@tauri-apps/api/core';
 
 // 状态变量
 const isSpeaking = ref(false);
@@ -101,6 +132,10 @@ const lastEventType = ref('无');
 const showDebugInfo = ref(false);
 const errorLog = ref<string[]>([]);
 const audioTrackInfo = ref<any>(null);
+const showPlaybackDialog = ref(false);
+const capturedSegmentsCount = ref(0);
+const hasGlobalRecording = ref(false);
+const currentMicrophoneId = ref<string | null>(null);
 
 // 语音识别相关状态
 const recognizedText = ref('');
@@ -113,6 +148,9 @@ const speechStartTime = ref<number | null>(null);
 const app = getCurrentInstance();
 const audioCapture = app?.appContext.config.globalProperties.$audioCapture as AudioCaptureInterface | undefined;
 
+// 检查全局状态的定时器引用
+let statusCheckInterval: number | null = null;
+
 // 计算属性
 const sampleRate = computed(() => {
   return audioCapture?.context?.sampleRate || '未知';
@@ -120,6 +158,98 @@ const sampleRate = computed(() => {
 
 const audioContextState = computed(() => {
   return audioCapture?.context?.state || '未初始化';
+});
+
+// 监听麦克风变更事件
+function handleMicrophoneChanged(event: CustomEvent) {
+  if (event.detail && event.detail.success) {
+    const newMicrophoneId = event.detail.deviceId;
+    console.log("[RealTimeVad] 检测到麦克风变更:", newMicrophoneId);
+    
+    currentMicrophoneId.value = newMicrophoneId;
+    
+    // 如果实时VAD已经激活，需要同步状态
+    if (isActive.value) {
+      console.log("[RealTimeVad] 正在同步麦克风变更...");
+      syncWithGlobalCapture();
+    }
+  }
+}
+
+// 当其他组件改变全局捕获状态时，同步本组件状态
+onMounted(() => {
+  window.addEventListener('vad-status-change', handleVadEvent as EventListener);
+  window.addEventListener('stt-result', handleSttResult as EventListener);
+  window.addEventListener('playback-completed', handlePlaybackCompleted as EventListener);
+  // 添加麦克风变更事件监听
+  window.addEventListener('microphone-changed', handleMicrophoneChanged as EventListener);
+  
+  // 初始化状态同步
+  if (audioCapture) {
+    isActive.value = audioCapture.isInitialized;
+    currentMicrophoneId.value = audioCapture.currentMicrophoneId;
+    if (isActive.value) {
+      statusText.value = '监听中';
+    }
+  }
+  
+  // 创建一个检查全局状态的定时器
+  statusCheckInterval = window.setInterval(() => {
+    syncWithGlobalCapture();
+  }, 1000); // 每秒检查一次
+});
+
+// 同步与全局音频捕获的状态
+function syncWithGlobalCapture() {
+  if (audioCapture) {
+    // 同步活跃状态
+    if (isActive.value !== audioCapture.isInitialized) {
+      console.log("[RealTimeVad] 全局捕获状态变化，同步状态", 
+                  { local: isActive.value, global: audioCapture.isInitialized });
+      isActive.value = audioCapture.isInitialized;
+      statusText.value = isActive.value ? '监听中' : '已停止';
+    }
+    
+    // 同步麦克风ID
+    if (currentMicrophoneId.value !== audioCapture.currentMicrophoneId) {
+      console.log("[RealTimeVad] 全局麦克风变化，同步麦克风", 
+                  { local: currentMicrophoneId.value, global: audioCapture.currentMicrophoneId });
+      currentMicrophoneId.value = audioCapture.currentMicrophoneId;
+      
+      // 更新音频轨道信息
+      if (audioCapture.stream) {
+        const tracks = audioCapture.stream.getAudioTracks();
+        if (tracks.length > 0) {
+          audioTrackInfo.value = tracks[0].getSettings();
+        }
+      }
+    }
+  }
+}
+
+// 处理播放完成事件
+function handlePlaybackCompleted() {
+  statusText.value = '播放完成';
+  console.log("[RealTimeVad] 音频播放完成");
+}
+
+// 组件卸载时清理
+onUnmounted(() => {
+  if (isActive.value && audioCapture) {
+    audioCapture.stop();
+  }
+  
+  // 移除事件监听器
+  window.removeEventListener('vad-status-change', handleVadEvent as EventListener);
+  window.removeEventListener('stt-result', handleSttResult as EventListener);
+  window.removeEventListener('playback-completed', handlePlaybackCompleted as EventListener);
+  window.removeEventListener('microphone-changed', handleMicrophoneChanged as EventListener);
+  
+  // 清理状态检查定时器
+  if (statusCheckInterval !== null) {
+    clearInterval(statusCheckInterval);
+    statusCheckInterval = null;
+  }
 });
 
 // 开始/停止音频捕获
@@ -131,11 +261,25 @@ async function toggleAudioCapture() {
   
   try {
     if (isActive.value) {
+      // 停止捕获前先检查是否有语音段可以播放
+      try {
+        // 停止全局缓存录音
+        audioCapture.stopRecording();
+        
+        // 获取全局缓存的录音时长
+        const recordingDuration = audioCapture.getRecordingDuration();
+        const hasRecordedAudio = recordingDuration > 0;
+        
+        // 获取语音段
+        const segments = await invoke<any[]>('get_speech_segments');
+        capturedSegmentsCount.value = segments ? segments.length : 0;
+        
       // 停止捕获
       audioCapture.stop();
       isActive.value = false;
       statusText.value = '已停止';
       processedFrames.value = 0;
+        
       // 保存最后的识别结果到历史
       if (recognizedText.value) {
         textHistory.value.unshift(recognizedText.value);
@@ -144,13 +288,44 @@ async function toggleAudioCapture() {
           textHistory.value = textHistory.value.slice(0, 10);
         }
       }
+        
       // 清空识别结果
       recognizedText.value = '';
+        console.log("[RealTimeVad] 停止识别，全局音频捕获已停止");
+        
+        // 显示播放对话框条件：有语音段或有录音
+        if (capturedSegmentsCount.value > 0 || hasRecordedAudio) {
+          showPlaybackDialog.value = true;
+          hasGlobalRecording.value = hasRecordedAudio;
+        }
+      } catch (error) {
+        console.error('获取语音段信息失败:', error);
+        
+        // 即使获取语音段失败，也要停止捕获
+        audioCapture.stopRecording();
+        audioCapture.stop();
+        isActive.value = false;
+        statusText.value = '已停止';
+        
+        // 保存最后的识别结果到历史
+        if (recognizedText.value) {
+          textHistory.value.unshift(recognizedText.value);
+        }
+        recognizedText.value = '';
+      }
     } else {
       // 开始捕获
-      await audioCapture.init();
+      // 使用当前选择的麦克风ID（如果有的话）
+      const microphoneId = audioCapture.currentMicrophoneId;
+      console.log("[RealTimeVad] 使用麦克风启动音频捕获:", microphoneId);
+      
+      await audioCapture.init(microphoneId || undefined);
+      // 开始全局缓存录音
+      audioCapture.startRecording();
+      
       isActive.value = true;
       statusText.value = '监听中';
+      currentMicrophoneId.value = audioCapture.currentMicrophoneId; // 更新当前麦克风ID
       
       // 获取音频轨道信息
       if (audioCapture.stream) {
@@ -159,12 +334,56 @@ async function toggleAudioCapture() {
           audioTrackInfo.value = tracks[0].getSettings();
         }
       }
+      console.log("[RealTimeVad] 开始识别，全局音频捕获已启动");
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('音频捕获错误:', error);
     addErrorLog(`音频捕获错误: ${errorMessage}`);
     statusText.value = '错误';
+  }
+}
+
+// 播放录制的语音段
+async function playRecordedSpeech() {
+  showPlaybackDialog.value = false;
+  
+  try {
+    // 发布全局事件通知 VadPlayback 组件播放语音段
+    window.dispatchEvent(new CustomEvent('play-speech-segments'));
+    
+    // 如果您想直接从这里调用 VadPlayback 的方法，可以使用以下代码
+    // await invoke('get_speech_segments') 这会在RealTimeVad组件中直接获取和播放语音段
+    
+    console.log("[RealTimeVad] 已触发语音段播放事件");
+  } catch (error) {
+    console.error('播放语音段失败:', error);
+    addErrorLog(`播放语音段失败: ${error}`);
+  }
+}
+
+// 播放全局缓存录音
+async function playGlobalRecording() {
+  showPlaybackDialog.value = false;
+  
+  try {
+    // 直接调用全局音频捕获接口的播放方法
+    if (audioCapture) {
+      const success = await audioCapture.playRecordedAudio();
+      if (success) {
+        statusText.value = '正在播放录音...';
+      } else {
+        statusText.value = '无法播放录音';
+        addErrorLog('播放录音失败，可能没有录音数据');
+      }
+    } else {
+      addErrorLog('音频捕获接口不可用');
+    }
+    
+    console.log("[RealTimeVad] 播放全局录音");
+  } catch (error) {
+    console.error('播放全局录音失败:', error);
+    addErrorLog(`播放全局录音失败: ${error}`);
   }
 }
 
@@ -178,9 +397,11 @@ function handleVadEvent(event: CustomEvent) {
     isSpeaking.value = true;
     // 记录语音开始时间，用于计算延迟
     speechStartTime.value = Date.now();
+    console.log("[RealTimeVad] 检测到语音开始");
   } else if (vadEvent === VadEventType.SpeechEnd) {
     isSpeaking.value = false;
     speechStartTime.value = null;
+    console.log("[RealTimeVad] 检测到语音结束，语音段应已保存");
   } else if (vadEvent === VadEventType.Processing) {
     processedFrames.value++;
   }
@@ -227,54 +448,6 @@ function addErrorLog(message: string) {
   }
 }
 
-// 复制调试信息
-function copyDebugInfo() {
-  const debugInfo = {
-    状态: {
-      isSpeaking: isSpeaking.value,
-      isActive: isActive.value,
-      statusText: statusText.value,
-      processedFrames: processedFrames.value,
-      lastEventTime: lastEventTime.value,
-      lastEventType: lastEventType.value,
-      recognizedText: recognizedText.value,
-      isTextFinal: isTextFinal.value,
-      latencyMs: latencyMs.value
-    },
-    音频信息: {
-      sampleRate: sampleRate.value,
-      audioContextState: audioContextState.value,
-      frameCount: audioCapture?.frameCount || 0,
-      errorCount: audioCapture?.errorCount || 0
-    },
-    轨道信息: audioTrackInfo.value,
-    错误日志: errorLog.value
-  };
-  
-  navigator.clipboard.writeText(JSON.stringify(debugInfo, null, 2))
-    .then(() => {
-      alert('调试信息已复制到剪贴板');
-    })
-    .catch(err => {
-      console.error('复制失败:', err);
-      addErrorLog(`复制失败: ${err}`);
-    });
-}
-
-// 组件挂载时添加事件监听
-onMounted(() => {
-  window.addEventListener('vad-status-change', handleVadEvent as EventListener);
-  window.addEventListener('stt-result', handleSttResult as EventListener);
-});
-
-// 组件卸载时清理
-onUnmounted(() => {
-  if (isActive.value && audioCapture) {
-    audioCapture.stop();
-  }
-  window.removeEventListener('vad-status-change', handleVadEvent as EventListener);
-  window.removeEventListener('stt-result', handleSttResult as EventListener);
-});
 </script>
 
 <style scoped>
@@ -497,19 +670,65 @@ onUnmounted(() => {
   color: #d32f2f;
 }
 
-.copy-debug {
-  margin-top: 15px;
-  background-color: #607d8b;
-  color: white;
-  border: none;
-  padding: 8px 15px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 13px;
+/* 对话框样式 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
 }
 
-.copy-debug:hover {
-  background-color: #455a64;
+.dialog-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.dialog-content h4 {
+  margin-top: 0;
+  color: #333;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.dialog-buttons button {
+  padding: 8px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.cancel-button {
+  background-color: #e0e0e0;
+  color: #333;
+}
+
+.play-button {
+  background-color: #4285f4;
+  color: white;
+}
+
+.cancel-button:hover {
+  background-color: #d5d5d5;
+}
+
+.play-button:hover {
+  background-color: #3367d6;
 }
 
 @keyframes pulse {
@@ -581,6 +800,20 @@ onUnmounted(() => {
   .history-item {
     background-color: #3a3a3a;
     color: #ddd;
+  }
+  
+  .dialog-content {
+    background-color: #2a2a2a;
+    color: #eee;
+  }
+  
+  .dialog-content h4 {
+    color: #ddd;
+  }
+  
+  .cancel-button {
+    background-color: #424242;
+    color: #eee;
   }
 }
 </style> 

@@ -3,7 +3,6 @@ from typing import Protocol, Optional, List
 from dataclasses import dataclass
 
 
-# 这里请根据实际修改
 @dataclass
 class AudioData:
     """音频数据类

@@ -3,6 +3,7 @@ import json
 import os
 import asyncio
 import threading
+import time  # 添加time模块导入
 from typing import Optional, Any
 from dataclasses import dataclass
 
@@ -143,6 +144,13 @@ class AliCloudSTTAdapter(STTClient):
         self.complete_sentences = []  # 存储完整句子的列表
         self.sentences_lock = threading.Lock()  # 线程安全锁
         
+        # 重连相关属性
+        self.reconnecting = False  # 是否正在进行重连
+        self.reconnect_count = 0  # 重连尝试次数
+        self.max_reconnect_attempts = 3  # 最大重连尝试次数
+        self.last_activity_time = 0  # 上次活动时间
+        self.reconnect_lock = asyncio.Lock()  # 重连锁，防止并发重连
+        
         print("【调试】阿里云语音识别适配器初始化完成")
         
     async def start_session(self) -> bool:
@@ -160,6 +168,9 @@ class AliCloudSTTAdapter(STTClient):
         self.is_final = False  # 重置最终结果标志
         self.last_sent_text = ""  # 重置上次发送的文本
         self.sentence_index = 0  # 重置句子索引
+        self.reconnecting = False  # 重置重连状态
+        self.reconnect_count = 0  # 重置重连计数
+        self.last_activity_time = time.time()  # 记录启动时间
         
         # 清空完整句子缓冲区
         with self.sentences_lock:
@@ -192,18 +203,10 @@ class AliCloudSTTAdapter(STTClient):
                     enable_intermediate_result=True,  # 启用中间结果返回
                     enable_punctuation_prediction=True,  # 启用标点符号预测
                     enable_inverse_text_normalization=True,  # 启用中文数字转阿拉伯数字
+                    # max_sentence_silence=2000,  # 将静音阈值设置为2000ms，延长会话超时
                     # disfluency=True,  # 过滤语气词，即声音顺滑，默认值false（关闭）
                     # enable_words=True,  # 是否开启返回词信息，默认是false。
                     # enable_semantic_sentence_detection=True  # 是否开启语义断句，可选，默认是False。
-                                        # ex={"disfluency": True,
-                    #      "enable_words": True,
-                    #      "enable_semantic_sentence_detection": True},
-                    # disfluency=True,  # 过滤语气词，即声音顺滑，默认值false（关闭）
-                    # #max_sentence_silence=800 语音断句检测阈值，静音时长超过该阈值会被认为断句，参数范围200ms～6000ms，默认值800ms。
-                    # # 开启语义断句enable_semantic_sentence_detection后，此参数无效。
-                    # enable_words=True,  # 是否开启返回词信息，默认是false。
-                    # enable_semantic_sentence_detection=True  # 是否开启语义断句，可选，默认是False。
-                    # 语义断句参数需要和开启中间结果配合使用，即开启该语义断句参数需将中间结果参数同时打开：enable_intermediate_result=true。
                 )
                 print("【调试】线程内: transcriber.start()调用成功")
             except Exception as exc:  # 使用不同的变量名避免闭包问题
@@ -248,6 +251,17 @@ class AliCloudSTTAdapter(STTClient):
         if not self.transcriber:
             print("【错误】语音识别会话未启动，无法发送音频数据")
             raise RuntimeError("语音识别会话未启动")
+        
+        # 检查是否正在重连中
+        if self.reconnecting:
+            print("【调试】正在重连中，等待重连完成...")
+            # 如果已经达到最大重连次数，则抛出异常
+            if self.reconnect_count >= self.max_reconnect_attempts:
+                raise RuntimeError("重连次数已达上限，无法发送音频数据")
+            await asyncio.sleep(0.1)  # 等待一段时间
+        
+        # 更新活动时间
+        self.last_activity_time = time.time()
         
         # 发送音频数据到识别器
         # print(f"【调试】发送音频数据，大小: {len(audio_data.data)}字节")  # 这行会产生大量日志，可能影响性能
@@ -455,11 +469,26 @@ class AliCloudSTTAdapter(STTClient):
             *args: 其他可能的参数
         """
         print(f"【错误】识别错误回调: {message}")
+        
+        # 解析错误消息
+        try:
+            error_data = json.loads(message)
+            status_text = error_data.get("header", {}).get("status_text", "")
+            
+            # 检测是否为超时错误
+            if "timeout" in status_text.lower():
+                print("【调试】检测到超时错误，尝试自动重连")
+                # 在事件循环中异步执行重连
+                asyncio.run_coroutine_threadsafe(self._reconnect(), self.loop)
+        except Exception as e:
+            print(f"【错误】解析错误消息失败: {e}")
+        
         # 如果future还未完成，标记为发生异常
         if not self.future.done():
             error = Exception(f"语音识别错误: {message}")
             print("【调试】通知future发生错误")
             self.loop.call_soon_threadsafe(self.future.set_exception, error)
+            
         # 通知等待结果的协程继续执行
         print("【调试】触发result_ready事件")
         self.loop.call_soon_threadsafe(self._result_ready.set)
@@ -500,4 +529,64 @@ class AliCloudSTTAdapter(STTClient):
             count = len(self.complete_sentences)
             self.complete_sentences = []
             print(f"【调试】已清空句子缓冲区，清除了{count}个句子")
-            return count 
+            return count
+
+    async def _reconnect(self) -> None:
+        """尝试重新连接阿里云语音识别服务
+        
+        在检测到超时错误后自动调用，尝试重新建立语音识别会话
+        保留已识别的文本，确保重连不会丢失数据
+        """
+        # 使用锁确保同一时间只有一个重连操作
+        async with self.reconnect_lock:
+            # 避免重复重连
+            if self.reconnecting:
+                print("【调试】已有重连过程在进行中，跳过")
+                return
+            
+            # 检查重连次数是否达到上限
+            if self.reconnect_count >= self.max_reconnect_attempts:
+                print(f"【警告】重连次数已达上限({self.max_reconnect_attempts})，不再尝试重连")
+                return
+            
+            print(f"【调试】开始第 {self.reconnect_count + 1} 次重连")
+            self.reconnecting = True
+            self.reconnect_count += 1
+            
+            # 保存当前识别状态
+            saved_text = self.current_text
+            saved_sentences = []
+            with self.sentences_lock:
+                saved_sentences = self.complete_sentences.copy()
+            
+            try:
+                # 关闭当前会话
+                if self.transcriber:
+                    try:
+                        print("【调试】重连前关闭当前识别器")
+                        self.transcriber.shutdown()
+                    except Exception as e:
+                        print(f"【错误】关闭识别器时出错: {e}")
+                    self.transcriber = None
+                
+                # 等待一小段时间后再重连
+                await asyncio.sleep(0.5)
+                
+                # 启动新会话
+                print("【调试】开始重新启动语音识别会话")
+                result = await self.start_session()
+                
+                if result:
+                    print("【调试】重连成功，恢复之前的识别状态")
+                    # 恢复之前的识别状态
+                    self.current_text = saved_text
+                    with self.sentences_lock:
+                        self.complete_sentences = saved_sentences
+                    print(f"【调试】恢复识别文本: '{self.current_text}'")
+                else:
+                    print("【错误】重连失败")
+            except Exception as e:
+                print(f"【错误】重连过程中发生异常: {e}")
+            finally:
+                self.reconnecting = False
+                print(f"【调试】重连过程结束，状态: {'成功' if self.transcriber else '失败'}") 

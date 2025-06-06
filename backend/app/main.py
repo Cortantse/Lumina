@@ -14,7 +14,6 @@ from app.services.pipeline import PipelineService
 from app.stt.alicloud_client import AliCloudConfig
 from app.stt.websocket_adapter import WebSocketSTTHandler
 from app.stt.socket_adapter import SocketSTTHandler
-from app.api.v1 import stt as stt_router
 
 # 加载环境变量
 load_dotenv()
@@ -68,8 +67,6 @@ async def startup_event():
     socket_handler = SocketSTTHandler(stt_client=pipeline_service.stt_client)
     asyncio.create_task(socket_handler.start())
     
-    # 初始化STT API路由处理器
-    stt_router.init_websocket_handler(websocket_handler)
 
 
 @app.on_event("shutdown")
@@ -83,46 +80,6 @@ async def shutdown_event():
     if socket_handler:
         await socket_handler.stop()
 
-
-@app.get("/")
-async def root():
-    """根路由，返回API信息"""
-    return {"message": "欢迎使用Lumina语音助手API", "status": "online"}
-
-
-@app.get("/health")
-async def health_check():
-    """健康检查端点"""
-    return {"status": "healthy", "service": "Lumina语音助手"}
-
-
-# 注册STT API路由
-app.include_router(stt_router.router, prefix="/api")
-
-
-# 添加新的API端点，直接在main.py中实现
-@app.get("/api/stt/sentences", response_model=List[str])
-async def get_sentences():
-    """获取当前缓冲区中的完整句子
-    
-    Returns:
-        List[str]: 识别出的完整句子列表
-    """
-    if pipeline_service and pipeline_service.stt_client:
-        return await pipeline_service.stt_client.get_complete_sentences()
-    return []
-
-
-@app.delete("/api/stt/sentences", response_model=int)
-async def clear_sentences():
-    """清空句子缓冲区
-    
-    Returns:
-        int: 清除的句子数量
-    """
-    if pipeline_service and pipeline_service.stt_client:
-        return await pipeline_service.stt_client.clear_sentence_buffer()
-    return 0
 
 
 @app.websocket("/ws/audio")
