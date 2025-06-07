@@ -3,6 +3,9 @@ import os
 import asyncio
 from typing import Dict
 
+# 不要动，必须在这一步解密api_keys.json中的密钥到环境变量中
+import app.utils.decrypt as decrypt # type: ignore
+
 from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI
