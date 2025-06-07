@@ -3,6 +3,9 @@ import os
 import asyncio
 from typing import Dict
 
+# 不要动，必须在这一步解密api_keys.json中的密钥到环境变量中
+import app.utils.decrypt as decrypt # type: ignore
+
 from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI
@@ -48,6 +51,14 @@ async def startup_event():
     
     # 从环境变量获取MiniMax TTS API Key
     tts_api_key = os.environ.get("MINIMAX_API_KEY", None)
+
+    # 打印当前所有环境变量
+    print(f"app_key: {app_key}")
+    print(f"access_key_id: {access_key_id}")
+    print(f"access_key_secret: {access_key_secret}")
+    print(f"token: {token}")
+    print(f"url: {url}")
+    print(f"tts_api_key: {tts_api_key}")
     
     # 创建阿里云STT配置字典
     stt_config: Dict = {

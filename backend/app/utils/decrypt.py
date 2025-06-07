@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 
 # 从JSON文件中读取API密钥
-def load_api_keys(filename: str = "backend/app/core/api_keys.json") -> dict:
+def load_api_keys(filename: str = "app/core/api_keys.json") -> dict:
     if not os.path.exists(filename):
         print(f"⚠️ API密钥文件 {filename} 不存在")
         # 检查备份文件
@@ -93,7 +93,7 @@ def decrypt_all_api_keys(aes_key_base64: str, api_keys: dict = None):  # type: i
             decrypted_text = decrypted.decode("utf-8")
 
             # 存入环境变量
-            os.environ[f"API_KEY_{name.upper()}"] = decrypted_text
+            os.environ[f"{name}"] = decrypted_text
             print(
                 f"✅ 成功解密并保存 {name} API Key: {decrypted_text[:4]}...{decrypted_text[-4:] if len(decrypted_text) > 8 else ''}")
 

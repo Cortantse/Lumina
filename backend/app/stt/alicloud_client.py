@@ -25,7 +25,7 @@ class AliCloudConfig:
     access_key_secret: str = ""   # 阿里云账号的AccessKeySecret（用于创建Token）
     token: str = ""               # 阿里云语音识别服务的访问令牌
     url: str = "wss://nls-gateway-cn-shenzhen.aliyuncs.com/ws/v1"  # 阿里云语音服务的WebSocket地址（深圳区域）
-    region: str = "cn-shanghai"   # 阿里云区域
+    region: str = "cn-shenzhen"   # 阿里云区域
     
     def __post_init__(self):
         """配置初始化后处理

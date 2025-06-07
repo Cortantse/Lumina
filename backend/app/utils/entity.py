@@ -75,7 +75,7 @@ class TemplateRequest:
                 # 遍历该平台所有API密钥
                 for i, api_key_name in enumerate(api_keys):
                     # 构建环境变量名
-                    env_key = f"API_KEY_{api_key_name}"
+                    env_key = f"{api_key_name}" # 这里直接获取环境变量
                     api_key_value = os.getenv(env_key)
 
                     if not api_key_value:
