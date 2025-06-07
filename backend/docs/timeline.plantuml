@@ -5,7 +5,7 @@ participant "Semantic Turn Detection" as STD
 participant LLM
 participant UI
 
-start
+' start
 
 Frontend -> Frontend : 0–20ms\n缓冲 frame1
 note right of Frontend : VAD 需完整帧才能判断
@@ -79,5 +79,5 @@ activate LLM
 LLM -> UI : “好的，已为您打开灯并播放音乐” (~595ms)
 deactivate LLM
 
-stop
+' stop
 @enduml

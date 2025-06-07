@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import AudioPlayback from "./components/AudioPlayback.vue";
+import RealTimeVad from "./components/RealTimeVad.vue";
+import VadPlayback from "./components/VadPlayback.vue";
 
 const greetMsg = ref("");
 const name = ref("");
@@ -13,9 +16,24 @@ async function greet() {
 
 <template>
   <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
+    <h1>语音识别测试</h1>
+    
+    <div class="feature-section">
+      <h2>实时 VAD (语音活动检测)</h2>
+      <RealTimeVad />
+    </div>
 
-    <div class="row">
+    <div class="feature-section">
+      <h2>VAD语音段回放</h2>
+      <VadPlayback />
+    </div>
+
+    <div class="feature-section">
+      <h2>基础录音与回放</h2>
+      <AudioPlayback />
+    </div>
+
+    <div class="row logos">
       <a href="https://vitejs.dev" target="_blank">
         <img src="/vite.svg" class="logo vite" alt="Vite logo" />
       </a>
@@ -26,17 +44,28 @@ async function greet() {
         <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
       </a>
     </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
 
     <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
+      <input id="greet-input" v-model="name" placeholder="输入名称..." />
+      <button type="submit">问候</button>
     </form>
     <p>{{ greetMsg }}</p>
   </main>
 </template>
 
 <style scoped>
+.feature-section {
+  margin: 30px 0;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.logos {
+  margin: 30px 0;
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
@@ -44,7 +73,6 @@ async function greet() {
 .logo.vue:hover {
   filter: drop-shadow(0 0 2em #249b73);
 }
-
 </style>
 <style>
 :root {
@@ -143,6 +171,10 @@ button {
     background-color: #2f2f2f;
   }
 
+  .feature-section {
+    background-color: #3a3a3a;
+  }
+
   a:hover {
     color: #24c8db;
   }
@@ -156,5 +188,4 @@ button {
     background-color: #0f0f0f69;
   }
 }
-
 </style>
