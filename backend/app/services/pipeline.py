@@ -35,11 +35,6 @@ class PipelineService:
         self.last_response_text = ""  # 用于存储上一次处理过的识别文本，避免重复处理
         self.last_response_id = ""  # 用于存储上一次处理过的识别结果ID
         
-        # 设置默认TTS API密钥
-        if not tts_api_key:
-            # 使用默认API密钥
-            tts_api_key = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJSaWNoYXJkQyIsIlVzZXJOYW1lIjoiUmljaGFyZEMiLCJBY2NvdW50IjoiIiwiU3ViamVjdElEIjoiMTkyNzk3MTA0ODQ5MDI3OTI5OSIsIlBob25lIjoiMTk4NzYzODkyMjciLCJHcm91cElEIjoiMTkyNzk3MTA0ODQ4NjA4NDk5NSIsIlBhZ2VOYW1lIjoiIiwiTWFpbCI6IiIsIkNyZWF0ZVRpbWUiOiIyMDI1LTA2LTAxIDIyOjQ2OjE4IiwiVG9rZW5UeXBlIjoxLCJpc3MiOiJtaW5pbWF4In0.BXTTdEO3H-Uak_PiMy-vihcek65Od_fdnQi0w_ZNxH85VnHR6VY4hZDWWLBS3p8Mr9AGkBdMitLJsgX4YnWxQFKuV1svAVhmo8HxAdRSyxdpBKujIvKX3o0uEeOCSqTdJ6MJE1kbCBXtwqh4NRGhamUoHctg62ehGfCd1xjT16oArY5-q8b07qppc7wP5DH8GBYniSJKM6B1kousZV-b5E0md7D1z9n30_td2hy_kv_nKPRq5cJcd8e29Mkxme1GTFviRBC2hw0fptckJ2qWteWoBFwpN6SU0hlDnCK77JApihpNvKLmdBvuNF57ul6BJPkM3GeTDyPcuRboE_jZSg"
-        
         # 初始化TTS客户端
         self.tts_client = MiniMaxTTSClient(tts_api_key)
         self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
@@ -203,14 +198,21 @@ class PipelineService:
                         # 将所有句子合并为一段文本
                         text = "，".join(sentences)
                         # print(f"【调试】合并后的文本: '{text}'")
+
+                        # TODO: 这里应该等待 std 检测完成后才能清空 现在简化 
                         
-                        # 播放TTS
-                        self.tts_playing = True
-                        await self._play_tts(text)
-                        
-                        # 清空缓冲区
+                        # 清空缓冲区  
                         cleared_count = await self.stt_client.clear_sentence_buffer()
                         # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
+
+                                                # 播放TTS
+                        self.tts_playing = True
+
+                        from app.llm.qwen_client import simple_send_request_to_llm
+
+                        text = await simple_send_request_to_llm(text)
+
+                        await self._play_tts(text)
                         
                         self.tts_playing = False
                 

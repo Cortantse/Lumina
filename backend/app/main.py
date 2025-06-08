@@ -15,6 +15,7 @@ from app.protocols.stt import create_websocket_handler, create_socket_handler
 from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
+from app.api.v1.control import router as control_router
 
 # 加载环境变量
 load_dotenv()
@@ -90,6 +91,9 @@ async def shutdown_event():
 
 # 直接注册音频路由
 app.include_router(audio_router, prefix="/api/v1")
+
+# 注册控制路由
+app.include_router(control_router, prefix="/api/v1/control")
 
 
 def main():

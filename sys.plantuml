@@ -1,0 +1,105 @@
+@startuml
+
+actor "用户" as User
+participant "前端 (Tauri/Vue3)" as Frontend
+participant "后端 WebSocket\napp/api/v1/chat.py" as BackendWS
+participant "对话编排器\napp/services/orchestrator.py" as Orchestrator
+participant "处理流水线\napp/services/pipeline.py" as Pipeline
+participant "语音识别客户端\napp/stt/*.py" as STTClient
+participant "语义轮次检测\napp/std/*.py" as TurnDetector
+participant "记忆与检索\napp/memory & app/retrieval" as Memory
+participant "大语言模型客户端\napp/llm/*.py" as LLMClient
+participant "语音合成客户端\napp/tts/*.py" as TTSClient
+database "外部 STT 服务" as ExtSTT
+database "外部 LLM 服务" as ExtLLM
+database "外部 TTS 服务" as ExtTTS
+
+skinparam sequenceMessageAlign center
+
+title Lumina 端到端交互流程 (基于当前实现)
+
+== 1. 用户开始说话，前端发送音频流 ==
+User -> Frontend: 开始说话
+activate Frontend
+note right of Frontend: 麦克风采集音频\n并执行 VAD 检测人声段落
+loop 音频流传输
+    Frontend -> BackendWS: 发送音频帧 (AudioFrame)
+    activate BackendWS
+    BackendWS -> Orchestrator: handle_audio_stream(audio_frame)
+    activate Orchestrator
+    Orchestrator -> Pipeline: process_audio(audio_frame)
+    activate Pipeline
+    Pipeline -> STTClient: send_audio(audio_frame)
+    activate STTClient
+    STTClient -> ExtSTT: 流式发送音频数据
+    ExtSTT --> STTClient: 返回中间识别结果 (PartialTranscript)
+    STTClient --> Pipeline: yield PartialTranscript
+    deactivate STTClient
+    Pipeline --> Orchestrator: yield PartialTranscript
+    Orchestrator --> BackendWS: send_json(partial_transcript)
+    BackendWS --> Frontend: 推送实时字幕
+    deactivate Pipeline
+    deactivate Orchestrator
+    deactivate BackendWS
+end
+
+== 2. 用户停止说话，触发核心逻辑 ==
+User -> Frontend: 停止说话
+note right of Frontend: VAD 检测到静音，触发 end_of_segment
+Frontend -> BackendWS: 发送控制消息 ('end_of_segment')
+activate BackendWS
+BackendWS -> Orchestrator: handle_control_message('end_of_segment')
+activate Orchestrator
+Orchestrator -> Pipeline: finalize_processing()
+activate Pipeline
+Pipeline -> STTClient: close_stream()
+activate STTClient
+STTClient -> ExtSTT: 通知音频流结束
+ExtSTT --> STTClient: 返回最终识别结果 (FinalTranscript)
+STTClient --> Pipeline: return FinalTranscript
+deactivate STTClient
+
+Pipeline -> TurnDetector: detect(final_transcript)
+activate TurnDetector
+note left of TurnDetector: 根据规则或LLM判断\n用户本轮对话是否结束
+TurnDetector --> Pipeline: return is_turn_end=True
+deactivate TurnDetector
+
+Pipeline -> Memory: retrieve(final_transcript)
+activate Memory
+note right of Memory: 整合历史对话\n从向量数据库检索相关记忆
+Memory --> Pipeline: return DialogueContext
+deactivate Memory
+
+Pipeline -> LLMClient: get_response_stream(context)
+activate LLMClient
+LLMClient -> ExtLLM: 流式请求 LLM 推理
+ExtLLM --> LLMClient: 流式返回文本块 (Text Chunk)
+LLMClient --> Pipeline: yield Text Chunk
+deactivate LLMClient
+
+loop LLM响应与TTS合成
+    Pipeline -> TTSClient: generate_audio_stream(text_chunk)
+    activate TTSClient
+    TTSClient -> ExtTTS: 请求合成语音
+    ExtTTS --> TTSClient: 返回音频流数据 (AudioSegment)
+    deactivate TTSClient
+    
+    Pipeline --> Orchestrator: yield AudioSegment
+    Orchestrator --> BackendWS: send_bytes(audio_segment)
+    BackendWS --> Frontend: 推送合成的语音流
+    Frontend -> User: 播放合成语音
+end
+deactivate Pipeline
+deactivate Orchestrator
+deactivate BackendWS
+deactivate Frontend
+
+== 3. 对话结束，更新记忆 ==
+note over Pipeline: 在LLM完全响应后
+Pipeline -> Memory: store(dialogue_context)
+activate Memory
+note right of Memory: 将本次对话的摘要\n存入长期记忆
+deactivate Memory
+
+@enduml

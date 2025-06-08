@@ -28,7 +28,8 @@ const SOCKET_PATH: &str = "/tmp/lumina_stt.sock";
 #[cfg(windows)]
 const TCP_ADDRESS: &str = "127.0.0.1:8765"; // Windows下使用TCP端口
 const RECONNECT_INTERVAL_MS: u64 = 500;
-const SEND_BUFFER_THRESHOLD: usize = 4096; // 约200ms的音频@16kHz
+const SEND_BUFFER_THRESHOLD: usize = 3200; // 200ms的音频@16kHz (10帧 * 320样本/帧)
+const SILENCE_REPORT_INTERVAL_MS: u64 = 20; // 20ms间隔发送静音事件
 
 // VAD 事件类型
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -36,6 +37,32 @@ pub enum VadEvent {
     SpeechStart,
     SpeechEnd,
     Processing,
+}
+
+// 状态机状态定义
+#[derive(Debug, Clone, PartialEq)]
+enum VadState {
+    Initial,    // 初始：什么都不干，只是激活 vad 组件
+    Speaking,   // 说话中：发送音频帧给后端，vad 计时保持清零
+    Waiting,    // 等待中：不发送音频帧，只发送静音上报事件
+    Listening,  // 听音中：播放后端音频，前端暂停录音
+}
+
+// 状态机事件定义
+#[derive(Debug, Clone)]
+enum VadStateMachineEvent {
+    VoiceFrame,      // 麦克风一帧有声音
+    SilenceFrame,    // 麦克风一帧无声音
+    BackendEndSession, // 后端结束session
+    BackendResetToInitial, // 后端请求重置到初始状态
+    AudioPlaybackStart, // 后端音频开始播放
+    AudioPlaybackEnd,   // 后端音频播放结束
+}
+
+// 静音上报事件
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SilenceEvent {
+    silence_ms: u64,
 }
 
 // STT 识别结果
@@ -51,6 +78,293 @@ type PlatformStream = UnixStream;
 #[cfg(windows)]
 type PlatformStream = TcpStream;
 
+// 状态机管理器
+struct VadStateMachine {
+    current_state: VadState,
+    silence_start_time: Option<Instant>,
+    app_handle: Option<tauri::AppHandle>,
+    silence_timer_handle: Option<tokio::task::JoinHandle<()>>,
+    silence_frames_count: usize,          // 连续静音帧计数
+    max_silence_frames: usize,            // 进入等待状态所需的静音帧数
+}
+
+impl VadStateMachine {
+    fn new() -> Self {
+        Self {
+            current_state: VadState::Initial,
+            silence_start_time: None,
+            app_handle: None,
+            silence_timer_handle: None,
+            silence_frames_count: 0,
+            max_silence_frames: 5, // 5帧无声音后进入等待状态
+        }
+    }
+    
+    // 向后端发送静音事件
+    fn send_silence_to_backend(silence_duration: u64) {
+        // 通过Socket管理器发送静音事件到后端
+        let socket_manager = get_socket_manager();
+        let result = socket_manager.lock();
+        match result {
+            Ok(mut manager) => {
+                manager.send_silence_event(silence_duration);
+            },
+            Err(e) => {
+                println!("[错误] 获取Socket管理器锁失败: {}", e);
+            }
+        }
+    }
+    
+    fn set_app_handle(&mut self, handle: tauri::AppHandle) {
+        self.app_handle = Some(handle);
+    }
+    
+    fn process_event(&mut self, event: VadStateMachineEvent, socket_manager: &mut SocketManager) -> bool {
+        let old_state = self.current_state.clone();
+        let should_send_to_python = match (&self.current_state, &event) {
+            // 状态转移规则：on(麦克风一帧有声音) from(初始) to(说话中)
+            (VadState::Initial, VadStateMachineEvent::VoiceFrame) => {
+                println!("[状态机] 初始 -> 说话中 (检测到语音)");
+                self.current_state = VadState::Speaking;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                true // 开始发送音频帧到Python
+            },
+            
+            // 状态转移规则：on(麦克风多帧无声音) from(说话中) to(等待中)
+            (VadState::Speaking, VadStateMachineEvent::SilenceFrame) => {
+                self.silence_frames_count += 1;
+                if self.silence_frames_count >= self.max_silence_frames {
+                    println!("[状态机] 说话中 -> 等待中 (检测到{}帧连续静音)", self.silence_frames_count);
+                    self.current_state = VadState::Waiting;
+                    self.silence_frames_count = 0;
+                    self.start_silence_reporting();
+                    false // 停止发送音频帧
+                } else {
+                    println!("[状态机] 说话中，静音帧计数: {}/{}", self.silence_frames_count, self.max_silence_frames);
+                    true // 继续发送音频帧(包括静音帧以保持连续性)
+                }
+            },
+            
+            // 状态转移规则：on(麦克风一帧有声音) from(等待中) to(说话中)
+            (VadState::Waiting, VadStateMachineEvent::VoiceFrame) => {
+                println!("[状态机] 等待中 -> 说话中 (重新检测到语音，发送前置上下文帧)");
+                // 发送前置上下文帧
+                socket_manager.send_pre_context_frames();
+                self.current_state = VadState::Speaking;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                true // 重新开始发送音频帧到Python
+            },
+            
+            // 状态转移规则：on(后端结束session) from(等待中) to(初始)
+            (VadState::Waiting, VadStateMachineEvent::BackendEndSession) => {
+                println!("[状态机] 等待中 -> 初始 (后端结束session)");
+                self.current_state = VadState::Initial;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                false // 停止所有处理
+            },
+            
+            // 在说话中状态继续有语音帧
+            (VadState::Speaking, VadStateMachineEvent::VoiceFrame) => {
+                self.silence_frames_count = 0; // 重置静音帧计数
+                true // 继续发送音频帧到Python
+            },
+            
+            // 在等待中状态继续静音
+            (VadState::Waiting, VadStateMachineEvent::SilenceFrame) => {
+                true // 继续不发送音频帧，静音上报继续进行  # 暂时也发送音频帧
+            },
+            
+            // 在初始状态的静音帧
+            (VadState::Initial, VadStateMachineEvent::SilenceFrame) => {
+                false // 初始状态不发送音频帧
+            },
+            
+            // 在初始状态的后端结束session事件
+            (VadState::Initial, VadStateMachineEvent::BackendEndSession) => {
+                false // 初始状态保持不变
+            },
+            
+            // 在说话中状态的后端结束session事件
+            (VadState::Speaking, VadStateMachineEvent::BackendEndSession) => {
+                println!("[状态机] 说话中 -> 初始 (后端结束session)");
+                self.current_state = VadState::Initial;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                false // 停止所有处理
+            },
+            
+            // 后端请求重置到初始状态事件 - 从任何状态都可以跳转到初始状态
+            (VadState::Initial, VadStateMachineEvent::BackendResetToInitial) => {
+                println!("[状态机] 初始 -> 初始 (后端请求重置，已在初始状态)");
+                false // 已在初始状态，无需处理
+            },
+            
+            (VadState::Speaking, VadStateMachineEvent::BackendResetToInitial) => {
+                println!("[状态机] 说话中 -> 初始 (后端请求重置到初始状态)");
+                self.current_state = VadState::Initial;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                false // 停止所有处理
+            },
+            
+            (VadState::Waiting, VadStateMachineEvent::BackendResetToInitial) => {
+                println!("[状态机] 等待中 -> 初始 (后端请求重置到初始状态)");
+                self.current_state = VadState::Initial;
+                self.silence_frames_count = 0;
+                self.stop_silence_reporting();
+                false // 停止所有处理
+            },
+            
+            // ========== Listening 状态相关转换 ==========
+            
+            // 状态转移规则：on(后端音频开始播放) from(初始/等待中) to(听音中)
+            (VadState::Initial, VadStateMachineEvent::AudioPlaybackStart) => {
+                println!("[状态机] 初始 -> 听音中 (后端音频开始播放)");
+                self.current_state = VadState::Listening;
+                self.stop_silence_reporting();
+                false // 不发送音频帧
+            },
+            
+            (VadState::Waiting, VadStateMachineEvent::AudioPlaybackStart) => {
+                println!("[状态机] 等待中 -> 听音中 (后端音频开始播放)");
+                self.current_state = VadState::Listening;
+                self.stop_silence_reporting();
+                false // 不发送音频帧
+            },
+            
+            // 状态转移规则：on(麦克风有声音) from(听音中) to(说话中) - 前端说话权重最高
+            (VadState::Listening, VadStateMachineEvent::VoiceFrame) => {
+                println!("[状态机] 听音中 -> 说话中 (用户打断，检测到语音)");
+                self.current_state = VadState::Speaking;
+                self.silence_frames_count = 0;
+                // 发送前置上下文帧
+                socket_manager.send_pre_context_frames();
+                true // 开始发送音频帧
+            },
+            
+            // 状态转移规则：on(后端音频播放结束) from(听音中) to(初始)
+            (VadState::Listening, VadStateMachineEvent::AudioPlaybackEnd) => {
+                println!("[状态机] 听音中 -> 初始 (后端音频播放结束)");
+                self.current_state = VadState::Initial;
+                false // 不发送音频帧
+            },
+            
+            // 在听音中状态的静音帧 - 保持状态
+            (VadState::Listening, VadStateMachineEvent::SilenceFrame) => {
+                false // 继续不发送音频帧
+            },
+            
+            // 在听音中状态的后端结束session
+            (VadState::Listening, VadStateMachineEvent::BackendEndSession) => {
+                println!("[状态机] 听音中 -> 初始 (后端结束session)");
+                self.current_state = VadState::Initial;
+                false // 停止所有处理
+            },
+            
+            // 在听音中状态的后端重置请求
+            (VadState::Listening, VadStateMachineEvent::BackendResetToInitial) => {
+                println!("[状态机] 听音中 -> 初始 (后端请求重置)");
+                self.current_state = VadState::Initial;
+                false // 停止所有处理
+            },
+            
+            // 在说话中状态收到音频播放事件 - 忽略，前端说话权重最高
+            (VadState::Speaking, VadStateMachineEvent::AudioPlaybackStart) => {
+                println!("[状态机] 忽略音频播放事件 (用户正在说话)");
+                true // 继续发送音频帧
+            },
+            
+            // 在听音中状态收到音频播放开始 - 保持状态
+            (VadState::Listening, VadStateMachineEvent::AudioPlaybackStart) => {
+                println!("[状态机] 保持听音中状态 (音频已在播放)");
+                false // 继续不发送音频帧
+            },
+            
+            // 其他状态收到音频播放结束事件 - 忽略
+            (_, VadStateMachineEvent::AudioPlaybackEnd) => {
+                false // 保持当前状态的行为
+            },
+        };
+        
+        if old_state != self.current_state {
+            println!("[状态机] 状态变更: {:?} -> {:?}", old_state, self.current_state);
+            
+            // 通知前端状态变化
+            if let Some(app_handle) = &self.app_handle {
+                let state_str = match self.current_state {
+                    VadState::Initial => "Initial",
+                    VadState::Speaking => "Speaking",
+                    VadState::Waiting => "Waiting",
+                    VadState::Listening => "Listening",
+                };
+                
+                if let Err(e) = app_handle.emit("vad-state-changed", state_str) {
+                    println!("[错误] 发送状态变化事件到前端失败: {}", e);
+                }
+            }
+        }
+        
+        should_send_to_python
+    }
+    
+    fn start_silence_reporting(&mut self) {
+        self.silence_start_time = Some(Instant::now());
+        
+        if let Some(app_handle) = &self.app_handle {
+            let app_handle_clone = app_handle.clone();
+            let handle = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_millis(SILENCE_REPORT_INTERVAL_MS));
+                let start_time = Instant::now();
+                
+                loop {
+                    interval.tick().await;
+                    let silence_duration = start_time.elapsed().as_millis() as u64;
+                    
+                    let silence_event = SilenceEvent {
+                        silence_ms: silence_duration,
+                    };
+                    
+                    // 发送到前端
+                    if let Err(e) = app_handle_clone.emit("silence-event", &silence_event) {
+                        println!("[错误] 发送静音事件到前端失败: {}", e);
+                        break;
+                    }
+                    
+                    // 同时发送到后端
+                    Self::send_silence_to_backend(silence_duration);
+                    
+                    // println!("[状态机] 发送静音事件: {}ms", silence_duration);
+                }
+            });
+            
+            self.silence_timer_handle = Some(handle);
+            println!("[状态机] 开始静音上报定时器");
+        }
+    }
+    
+    fn stop_silence_reporting(&mut self) {
+        if let Some(handle) = self.silence_timer_handle.take() {
+            handle.abort();
+            println!("[状态机] 停止静音上报定时器");
+        }
+        self.silence_start_time = None;
+    }
+    
+    fn reset_to_initial(&mut self) {
+        println!("[状态机] 重置到初始状态");
+        self.current_state = VadState::Initial;
+        self.stop_silence_reporting();
+        self.silence_frames_count = 0;
+    }
+    
+    fn get_current_state(&self) -> &VadState {
+        &self.current_state
+    }
+}
+
 // 线程安全的Socket连接管理器
 struct SocketManager {
     stream: Option<PlatformStream>,
@@ -63,6 +377,9 @@ struct SocketManager {
     current_voice_segment: Vec<i16>, // 用于收集当前的语音帧
     frames_without_voice: usize,     // 跟踪连续无语音的帧数
     sent_to_python_segments: Vec<Vec<i16>>, // 存储发送到Python的音频段
+    // 新增：前置缓冲区，用于保存语音开始前的几帧
+    pre_context_frames: Vec<Vec<i16>>,
+    max_pre_context_frames: usize,
 }
 
 impl SocketManager {
@@ -78,6 +395,8 @@ impl SocketManager {
             current_voice_segment: Vec::new(),  // 初始化当前语音段
             frames_without_voice: 0,            // 初始化无语音帧计数器
             sent_to_python_segments: Vec::new(), // 初始化发送到Python的音频段
+            pre_context_frames: Vec::new(),     // 前置缓冲区
+            max_pre_context_frames: 5,         // 5(100ms)作为上下文
         }
     }
 
@@ -97,7 +416,7 @@ impl SocketManager {
         println!("[调试] 尝试连接UnixSocket: {}", SOCKET_PATH);
         match UnixStream::connect(SOCKET_PATH) {
             Ok(stream) => {
-                println!("[调试] UnixSocket连接成功");
+                println!("[重要] UnixSocket连接成功到Python后端！");
                 stream.set_nonblocking(true).unwrap_or_else(|e| {
                     println!("[警告] 设置非阻塞模式失败: {}", e);
                 });
@@ -108,7 +427,7 @@ impl SocketManager {
                 true
             },
             Err(e) => {
-                println!("[错误] UnixSocket连接失败: {}", e);
+                println!("[错误] UnixSocket连接失败: {} (Python后端可能未启动或Socket权限问题)", e);
                 self.stream = None;
                 false
             }
@@ -267,25 +586,70 @@ impl SocketManager {
             println!("[调试] 已保存发送到Python的音频段，当前共有{}个段", self.sent_to_python_segments.len());
         }
         
-        // 先发送长度头
+        // 准备完整的数据包（长度头 + 音频数据）以确保原子性发送
         let len_bytes = (segment.len() as u32).to_le_bytes();
-        if let Err(e) = stream.write_all(&len_bytes) {
-            println!("[错误] 发送长度头失败: {}", e);
-            self.stream = None;
-            return false;
-        }
-        
-        // 再发送音频数据
         let sample_bytes: Vec<u8> = segment.iter()
             .flat_map(|&sample| sample.to_le_bytes().to_vec())
             .collect();
         
-        if let Err(e) = stream.write_all(&sample_bytes) {
-            println!("[错误] 发送音频数据失败: {}", e);
+        // 创建完整的数据包
+        let mut full_packet = Vec::with_capacity(4 + sample_bytes.len());
+        full_packet.extend_from_slice(&len_bytes);
+        full_packet.extend_from_slice(&sample_bytes);
+        
+        // 原子性发送完整数据包，避免部分写入导致的乱序
+        if let Err(e) = stream.write_all(&full_packet) {
+            println!("[错误] 发送音频数据包失败: {}", e);
             self.stream = None;
             return false;
         }
+        
+        // 强制刷新缓冲区确保立即发送
+        if let Err(e) = stream.flush() {
+            println!("[警告] 刷新Socket缓冲区失败: {}", e);
+            // 不断开连接，因为flush失败不一定意味着数据没有发送
+        }
 
+        true
+    }
+    
+    // 发送静音事件到后端
+    fn send_silence_event(&mut self, silence_duration: u64) -> bool {
+        if !self.connect() {
+            return false;
+        }
+
+        let stream = match &mut self.stream {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // 创建静音事件数据包
+        // 格式：特殊长度头(0xFFFFFFFF) + 消息类型(0x01) + 静音时长(u64)
+        let mut silence_packet = Vec::with_capacity(4 + 1 + 8);
+        
+        // 特殊长度头，标识这是控制消息
+        silence_packet.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        
+        // 消息类型：0x01表示静音事件
+        silence_packet.push(0x01);
+        
+        // 静音时长（毫秒）
+        silence_packet.extend_from_slice(&silence_duration.to_le_bytes());
+        
+        // 发送静音事件数据包
+        if let Err(e) = stream.write_all(&silence_packet) {
+            println!("[错误] 发送静音事件失败: {}", e);
+            self.stream = None;
+            return false;
+        }
+        
+        // 刷新缓冲区
+        if let Err(e) = stream.flush() {
+            println!("[警告] 刷新静音事件缓冲区失败: {}", e);
+        }
+
+        println!("[调试] 已发送静音事件到后端: {}ms", silence_duration);
         true
     }
 
@@ -377,6 +741,34 @@ impl SocketManager {
     // 清空发送到Python的音频段
     fn clear_sent_to_python_segments(&mut self) {
         self.sent_to_python_segments.clear();
+    }
+
+    // 添加音频帧到前置缓冲区
+    fn add_to_pre_context(&mut self, samples: &[i16]) {
+        self.pre_context_frames.push(samples.to_vec());
+        
+        // 保持缓冲区大小
+        while self.pre_context_frames.len() > self.max_pre_context_frames {
+            self.pre_context_frames.remove(0);
+        }
+    }
+    
+    // 发送前置缓冲区中的所有帧
+    fn send_pre_context_frames(&mut self) -> bool {
+        println!("[重要] 发送前置上下文帧: {}帧", self.pre_context_frames.len());
+        let mut all_success = true;
+        
+        // 克隆前置帧数据避免借用冲突
+        let frames_to_send = self.pre_context_frames.clone();
+        
+        for frame in frames_to_send {
+            if !self.send_speech_segment(&frame) {
+                all_success = false;
+                println!("[警告] 前置帧发送失败");
+            }
+        }
+        
+        all_success
     }
 
     // 获取所有发送到Python的语音段合并成一个
@@ -472,7 +864,9 @@ impl VadProcessor {
         // 使用VAD检测语音
         let is_voice = match self.vad.is_voice_segment(&processed_samples) {
             Ok(result) => {
-                // println!("[调试] VAD检测结果: {}", if result { "有语音" } else { "无语音" });
+                if result {
+                    println!("[调试] VAD检测结果: 有语音");
+                }
                 result
             },
             Err(e) => {
@@ -498,9 +892,9 @@ impl VadProcessor {
             if self.is_speaking {
                 // println!("[调试] 检测到静音 (累计静音帧: {}), is_speaking: {}", self.silence_frames, self.is_speaking);
             }
-            if self.silence_frames >= 50 && self.is_speaking {
+            if self.silence_frames >= 100 && self.is_speaking {  // 增加到100帧(2秒)避免过早结束
                 self.is_speaking = false;
-                // println!("[重要] ====== 检测到语音结束 (累计静音帧: {}) ======", self.silence_frames);
+                println!("[重要] ====== 检测到语音结束 (累计静音帧: {}) ======", self.silence_frames);
                 event = VadEvent::SpeechEnd;
             }
         }
@@ -513,6 +907,7 @@ impl VadProcessor {
 // 全局状态
 static mut SOCKET_MANAGER: Option<Arc<Mutex<SocketManager>>> = None;
 static mut VAD_PROCESSOR: Option<Arc<Mutex<VadProcessor>>> = None;
+static mut VAD_STATE_MACHINE: Option<Arc<Mutex<VadStateMachine>>> = None;
 
 // 初始化Socket管理器
 fn init_socket_manager() -> Arc<Mutex<SocketManager>> {
@@ -550,6 +945,13 @@ fn init_vad_processor() -> Arc<Mutex<VadProcessor>> {
     processor
 }
 
+// 初始化VAD状态机
+fn init_vad_state_machine() -> Arc<Mutex<VadStateMachine>> {
+    println!("[调试] 初始化VAD状态机");
+    let state_machine = Arc::new(Mutex::new(VadStateMachine::new()));
+    state_machine
+}
+
 // 获取SocketManager实例
 fn get_socket_manager() -> Arc<Mutex<SocketManager>> {
     unsafe {
@@ -567,6 +969,16 @@ fn get_vad_processor() -> Arc<Mutex<VadProcessor>> {
             VAD_PROCESSOR = Some(init_vad_processor());
         }
         Arc::clone(VAD_PROCESSOR.as_ref().unwrap())
+    }
+}
+
+// 获取VAD状态机实例
+fn get_vad_state_machine() -> Arc<Mutex<VadStateMachine>> {
+    unsafe {
+        if VAD_STATE_MACHINE.is_none() {
+            VAD_STATE_MACHINE = Some(init_vad_state_machine());
+        }
+        Arc::clone(VAD_STATE_MACHINE.as_ref().unwrap())
     }
 }
 
@@ -602,6 +1014,19 @@ async fn process_audio_frame(
         }
     };
     
+    // 获取VAD状态机
+    let vad_state_machine = get_vad_state_machine();
+    let mut state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    // 确保状态机有app_handle
+    state_machine.set_app_handle(app_handle.clone());
+    
     // 获取SocketManager
     let socket_manager = get_socket_manager();
     
@@ -610,19 +1035,44 @@ async fn process_audio_frame(
         // 根据VAD结果控制缓冲
         let mut socket_manager_guard = socket_manager.lock().unwrap();
         
+        // 始终更新前置缓冲区（无论是否在发送状态）
+        socket_manager_guard.add_to_pre_context(&i16_samples);
+        
         // 使用新方法添加语音帧到当前语音段 - 这是保存VAD语音段的主要方法
         socket_manager_guard.add_voice_frame(&i16_samples, is_voice);
         
+        // 创建状态机事件
+        let sm_event = if is_voice {
+            VadStateMachineEvent::VoiceFrame
+        } else {
+            VadStateMachineEvent::SilenceFrame
+        };
+        
+        // 获取当前状态以检测状态变化
+        let old_should_send = match state_machine.get_current_state() {
+            VadState::Speaking => true,
+            _ => false,
+        };
+        
+        // 处理状态机，获取是否应该发送到Python
+        let should_send_to_python = state_machine.process_event(sm_event, &mut socket_manager_guard);
+        
+        // 检测状态机从非发送状态转为发送状态（语音开始）
+        let is_speech_starting = !old_should_send && should_send_to_python;
+        
+        if should_send_to_python {
+            if is_speech_starting {
+                println!("[重要] 语音开始！前置上下文帧已在状态机中发送");
+            }
+        }
+        
+        // 根据状态机决定是否处理音频
         match event {
             VadEvent::SpeechStart => {
-                println!("[调试] 检测到语音开始");
-                // 我们仍然保留原有的start_buffering逻辑，但只用于全局缓冲和STT处理
-                socket_manager_guard.start_buffering();
+                println!("[重要] 检测到语音开始，开始发送音频帧");
             },
             VadEvent::SpeechEnd => {
-                println!("[调试] 检测到语音结束");
-                // 停止全局缓冲
-                socket_manager_guard.stop_buffering();
+                println!("[重要] 检测到语音结束，停止发送音频帧");
                 
                 // 获取当前保存的语音段数量
                 let segment_count = socket_manager_guard.complete_speech_segments.len();
@@ -631,8 +1081,19 @@ async fn process_audio_frame(
             _ => {}
         }
         
-        // 添加音频样本到全局缓冲区（用于完整录音功能）
-        socket_manager_guard.add_audio_samples(&i16_samples);
+        // 在语音会话期间发送所有音频帧（包括静音帧），保证STT获得完整上下文
+        if should_send_to_python {
+            // 发送当前音频帧（无论是否包含语音）
+            if socket_manager_guard.send_speech_segment(&i16_samples) {
+                if is_voice {
+                    println!("[成功] 语音帧已发送到Python ({}个样本)", i16_samples.len());
+                } else {
+                    println!("[成功] 静音帧已发送到Python ({}个样本) - 保持上下文", i16_samples.len());
+                }
+            } else {
+                println!("[警告] 音频帧发送失败");
+            }
+        }
         
         // 发送事件到前端
         if let Err(e) = app_handle.emit("vad-event", &event) {
@@ -650,6 +1111,9 @@ async fn process_audio_frame(
 #[command]
 async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), String> {
     println!("[调试] 启动STT结果监听器");
+    
+    // 先等待一小段时间让后端Socket启动
+    tokio::time::sleep(Duration::from_millis(500)).await;
     
     // 启动后台线程接收STT结果
     let app_handle_clone = app_handle.clone();
@@ -676,26 +1140,39 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
             match connection_result {
                 Ok(mut stream) => {
                     #[cfg(unix)]
-                    println!("[调试] 已连接STT结果Socket");
+                    println!("[重要] STT结果监听器已成功连接到Socket: {}", result_socket_path);
                     #[cfg(windows)]
-                    println!("[调试] 已连接STT结果TCP服务器");
+                    println!("[重要] STT结果监听器已成功连接到TCP服务器: {}", result_tcp_address);
                     
-                    // 读取结果并转发
-                    let mut buffer = [0; 1024];
+                    // 读取结果并转发 - 支持换行符分隔的JSON消息
+                    let mut buffer = Vec::new();
+                    let mut temp_buffer = [0; 1024];
+                    
                     loop {
-                        match stream.read(&mut buffer) {
+                        match stream.read(&mut temp_buffer) {
                             Ok(size) if size > 0 => {
-                                match serde_json::from_slice::<SttResult>(&buffer[0..size]) {
-                                    Ok(result) => {
-                                        println!("[调试] 收到STT结果: {:?}", result);
-                                        
-                                        // 发送到前端
-                                        if let Err(e) = app_handle_clone.emit("stt-result", &result) {
-                                            println!("[错误] 发送STT结果到前端失败: {}", e);
+                                buffer.extend_from_slice(&temp_buffer[0..size]);
+                                
+                                // 处理缓冲区中的完整消息（以换行符分隔）
+                                while let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                                    // 复制消息字节以避免借用冲突
+                                    let message_bytes = buffer[0..newline_pos].to_vec();
+                                    buffer.drain(0..=newline_pos); // 移除已处理的消息和换行符
+                                    
+                                    // 尝试解析JSON消息
+                                    match serde_json::from_slice::<SttResult>(&message_bytes) {
+                                        Ok(result) => {
+                                            println!("[重要] 收到STT结果: '{}'，最终: {}", result.text, result.is_final);
+                                            
+                                            // 发送到前端
+                                            if let Err(e) = app_handle_clone.emit("stt-result", &result) {
+                                                println!("[错误] 发送STT结果到前端失败: {}", e);
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("[错误] 解析STT结果失败: {}", e);
+                                            println!("[调试] 原始消息: {:?}", String::from_utf8_lossy(&message_bytes));
                                         }
-                                    },
-                                    Err(e) => {
-                                        println!("[错误] 解析STT结果失败: {}", e);
                                     }
                                 }
                             },
@@ -710,8 +1187,8 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
                         }
                     }
                 },
-                Err(_e) => {
-                    // println!("[错误] 连接STT结果服务器失败: {}", e);
+                Err(e) => {
+                    println!("[错误] 连接STT结果服务器失败: {}", e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
@@ -836,6 +1313,13 @@ fn reset_vad_state() -> Result<String, String> {
         }
     };
     
+    // 同时重置状态机
+    let vad_state_machine = get_vad_state_machine();
+    if let Ok(mut state_machine) = vad_state_machine.lock() {
+        state_machine.reset_to_initial();
+        println!("[信息] VAD状态机已重置到初始状态");
+    }
+    
     result
 }
 
@@ -883,6 +1367,13 @@ fn stop_vad_processing() -> Result<String, String> {
         }
     };
     
+    // 同时重置状态机
+    let vad_state_machine = get_vad_state_machine();
+    if let Ok(mut state_machine) = vad_state_machine.lock() {
+        state_machine.reset_to_initial();
+        println!("[信息] VAD状态机已重置到初始状态");
+    }
+    
     result
 }
 
@@ -919,6 +1410,181 @@ async fn get_combined_speech_segment() -> Result<AudioSegment, String> {
     Ok(audio_segment)
 }
 
+// 新增：前端重置事件处理命令
+#[command]
+async fn reset_vad_session() -> Result<String, String> {
+    println!("[状态机] 收到前端重置事件，执行后端结束session");
+    
+    // 获取VAD状态机
+    let vad_state_machine = get_vad_state_machine();
+    let mut state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    // 获取SocketManager
+    let socket_manager = get_socket_manager();
+    let mut socket_manager_guard = match socket_manager.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取SocketManager锁失败: {}", e);
+            return Err(format!("获取SocketManager失败: {}", e));
+        }
+    };
+    
+    // 发送后端结束session事件到状态机
+    let _should_send_to_python = state_machine.process_event(
+        VadStateMachineEvent::BackendEndSession, 
+        &mut socket_manager_guard
+    );
+    
+    println!("[状态机] 前端重置事件处理完成，状态机已重置到初始状态");
+    Ok("VAD session已重置".to_string())
+}
+
+// 新增：处理后端控制消息的命令
+#[command]
+async fn handle_backend_control(action: String, data: String) -> Result<String, String> {
+    println!("[状态机] 收到后端控制消息: action={}, data={}", action, data);
+    
+    // 获取VAD状态机
+    let vad_state_machine = get_vad_state_machine();
+    let mut state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    // 获取SocketManager
+    let socket_manager = get_socket_manager();
+    let mut socket_manager_guard = match socket_manager.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取SocketManager锁失败: {}", e);
+            return Err(format!("获取SocketManager失败: {}", e));
+        }
+    };
+    
+    // 根据控制消息类型处理
+    let event = match action.as_str() {
+        "reset_to_initial" => {
+            println!("[状态机] 执行后端请求的重置到初始状态");
+            VadStateMachineEvent::BackendResetToInitial
+        },
+        "end_session" => {
+            println!("[状态机] 执行后端请求的结束session");
+            VadStateMachineEvent::BackendEndSession
+        },
+        _ => {
+            println!("[警告] 未知的后端控制动作: {}", action);
+            return Err(format!("未知的控制动作: {}", action));
+        }
+    };
+    
+    // 发送事件到状态机
+    let _should_send_to_python = state_machine.process_event(event, &mut socket_manager_guard);
+    
+    println!("[状态机] 后端控制消息处理完成");
+    Ok(format!("后端控制消息 '{}' 处理完成", action))
+}
+
+// 新增：音频播放开始事件处理
+#[command]
+async fn audio_playback_started() -> Result<String, String> {
+    println!("[状态机] 收到音频播放开始事件");
+    
+    // 获取VAD状态机
+    let vad_state_machine = get_vad_state_machine();
+    let mut state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    // 获取SocketManager
+    let socket_manager = get_socket_manager();
+    let mut socket_manager_guard = match socket_manager.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取SocketManager锁失败: {}", e);
+            return Err(format!("获取SocketManager失败: {}", e));
+        }
+    };
+    
+    // 发送音频播放开始事件到状态机
+    let _should_send_to_python = state_machine.process_event(
+        VadStateMachineEvent::AudioPlaybackStart, 
+        &mut socket_manager_guard
+    );
+    
+    println!("[状态机] 音频播放开始事件处理完成");
+    Ok("音频播放开始".to_string())
+}
+
+// 新增：音频播放结束事件处理
+#[command]
+async fn audio_playback_ended() -> Result<String, String> {
+    println!("[状态机] 收到音频播放结束事件");
+    
+    // 获取VAD状态机
+    let vad_state_machine = get_vad_state_machine();
+    let mut state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    // 获取SocketManager
+    let socket_manager = get_socket_manager();
+    let mut socket_manager_guard = match socket_manager.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取SocketManager锁失败: {}", e);
+            return Err(format!("获取SocketManager失败: {}", e));
+        }
+    };
+    
+    // 发送音频播放结束事件到状态机
+    let _should_send_to_python = state_machine.process_event(
+        VadStateMachineEvent::AudioPlaybackEnd, 
+        &mut socket_manager_guard
+    );
+    
+    println!("[状态机] 音频播放结束事件处理完成");
+    Ok("音频播放结束".to_string())
+}
+
+// 新增：获取当前状态机状态
+#[command]
+async fn get_vad_state() -> Result<String, String> {
+    let vad_state_machine = get_vad_state_machine();
+    let state_machine = match vad_state_machine.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            println!("[错误] 获取VAD状态机锁失败: {}", e);
+            return Err(format!("获取VAD状态机失败: {}", e));
+        }
+    };
+    
+    let state_str = match state_machine.get_current_state() {
+        VadState::Initial => "Initial",
+        VadState::Speaking => "Speaking",
+        VadState::Waiting => "Waiting",
+        VadState::Listening => "Listening",
+    };
+    
+    Ok(state_str.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("[信息] Lumina VAD 应用启动中...");
@@ -934,7 +1600,12 @@ pub fn run() {
             clear_speech_segments,
             create_test_speech_segment,
             reset_vad_state,
-            stop_vad_processing
+            stop_vad_processing,
+            reset_vad_session,
+            handle_backend_control,
+            audio_playback_started,
+            audio_playback_ended,
+            get_vad_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

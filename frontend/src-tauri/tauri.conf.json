@@ -18,9 +18,13 @@
       }
     ],
     "security": {
-      "csp": null
-    }
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: data:; connect-src 'self' ws: wss:; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:",
+      "capabilities": ["default"]
+    },
+    "withGlobalTauri": false,
+    "macOSPrivateApi": true
   },
+  "plugins": {},
   "bundle": {
     "active": true,
     "targets": "all",
@@ -30,6 +34,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "entitlements": "./Entitlements.plist"
+    }
   }
 }

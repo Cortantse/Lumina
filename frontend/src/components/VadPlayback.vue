@@ -88,7 +88,7 @@
 
 <script setup lang="ts">
 import { ref, onUnmounted, onMounted, computed } from 'vue';
-import { invoke } from "@tauri-apps/api/core";
+import { tauriApi } from '../services/tauriApi';
 
 // 接口定义
 interface AudioSegment {
@@ -153,8 +153,13 @@ onUnmounted(() => {
 
 // 检查是否有可用的语音段
 async function checkAvailableSegments() {
+  if (!tauriApi.isAvailable()) {
+    console.log('[VadPlayback] Tauri API 不可用，跳过语音段检查');
+    return;
+  }
+  
   try {
-    const segments = await invoke<AudioSegment[]>('get_speech_segments');
+    const segments = await tauriApi.invoke<AudioSegment[]>('get_speech_segments');
     if (segments && segments.length > 0) {
       console.log(`[VadPlayback] 发现${segments.length}个可用语音段`);
       audioSegments.value = segments;
@@ -182,12 +187,17 @@ async function handlePlayCombinedRequest() {
 
 // 创建测试音频段
 async function createTestSegment() {
+  if (!tauriApi.isAvailable()) {
+    errorMessage.value = 'Tauri API 不可用';
+    return;
+  }
+  
   try {
     isLoading.value = true;
     errorMessage.value = '';
     
     console.log("[VadPlayback] 创建测试音频段...");
-    await invoke('create_test_speech_segment');
+    await tauriApi.invoke('create_test_speech_segment');
     console.log("[VadPlayback] 测试音频段创建成功");
     
     // 立即获取语音段
@@ -206,6 +216,11 @@ async function fetchAndPlayAudio() {
     return;
   }
   
+  if (!tauriApi.isAvailable()) {
+    errorMessage.value = 'Tauri API 不可用';
+    return;
+  }
+  
   try {
     // 如果没有缓存的语音段，从后端获取
     if (audioSegments.value.length === 0) {
@@ -214,8 +229,8 @@ async function fetchAndPlayAudio() {
       
       console.log("[VadPlayback] 开始获取语音段...");
       
-      // 使用正确导入的invoke函数
-      const segments = await invoke<AudioSegment[]>('get_speech_segments');
+      // 使用TauriAPI服务
+      const segments = await tauriApi.invoke<AudioSegment[]>('get_speech_segments');
       isLoading.value = false;
       
       console.log("[VadPlayback] API返回结果:", segments);
@@ -249,6 +264,11 @@ async function fetchAndPlayCombinedAudio() {
     return;
   }
   
+  if (!tauriApi.isAvailable()) {
+    errorMessage.value = 'Tauri API 不可用';
+    return;
+  }
+  
   try {
     isLoading.value = true;
     errorMessage.value = '';
@@ -256,7 +276,7 @@ async function fetchAndPlayCombinedAudio() {
     console.log("[VadPlayback] 开始获取合并后的语音段...");
     
     // 获取合并后的语音段
-    const combined = await invoke<AudioSegment>('get_combined_speech_segment');
+    const combined = await tauriApi.invoke<AudioSegment>('get_combined_speech_segment');
     isLoading.value = false;
     
     if (!combined || combined.samples.length === 0) {
@@ -488,8 +508,8 @@ async function clearAudioSegments() {
     audioSegments.value = [];
     combinedSegment.value = null;
     
-    // 使用正确导入的invoke函数
-    await invoke('clear_speech_segments');
+    // 使用TauriAPI服务
+    await tauriApi.invoke('clear_speech_segments');
     console.log('[VadPlayback] 语音段已清空');
   } catch (error) {
     errorMessage.value = `清空语音段失败: ${error}`;

@@ -203,12 +203,23 @@ class AliCloudSTTAdapter(STTClient):
                     enable_intermediate_result=True,  # 启用中间结果返回
                     enable_punctuation_prediction=True,  # 启用标点符号预测
                     enable_inverse_text_normalization=True,  # 启用中文数字转阿拉伯数字
-                    # max_sentence_silence=2000,  # 将静音阈值设置为2000ms，延长会话超时
-                    # disfluency=True,  # 过滤语气词，即声音顺滑，默认值false（关闭）
-                    # enable_words=True,  # 是否开启返回词信息，默认是false。
-                    # enable_semantic_sentence_detection=True  # 是否开启语义断句，可选，默认是False。
+                    ex={
+                        "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
+                        # 语音断句检测阈值，静音时长超过该阈值会被认为断句
+                        # 范围：200-6000ms，默认800ms
+                        # 注意：启用语义断句后此参数无效
+                        "max_sentence_silence": 200,
+                        
+                        # 允许单句话最大结束时间，最小值5000ms，默认60000ms
+                        # 超过此时间会强制结束当前句子
+                        "max_single_segment_time": 30000,
+                        
+                        # 允许的最大结束静音，取值范围：200-6000ms，默认800ms
+                        # 控制句子结束时的静音检测敏感度
+                        "max_end_silence": 500
+                    }
                 )
-                # print("【调试】线程内: transcriber.start()调用成功")
+                print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
             except Exception as exc:  # 使用不同的变量名避免闭包问题
                 # 如果启动失败，通过Future通知等待的协程
                 print(f"【错误】线程内: 启动识别会话失败: {exc}")

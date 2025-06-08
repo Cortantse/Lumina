@@ -338,7 +338,7 @@ function generateSimulatedSpeech(time: number): number {
 
 const { onLoop } = useRenderLoop();
 
-onLoop(({ elapsed }) => {
+onLoop(({ elapsed }: { elapsed: number }) => {
   if (!canvasRef.value) return;
   shader.uniforms.u_time.value = elapsed;
   const sim = generateSimulatedSpeech(elapsed);

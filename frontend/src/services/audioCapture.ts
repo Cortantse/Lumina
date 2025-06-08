@@ -1,6 +1,8 @@
-import { invoke } from '@tauri-apps/api/core';
-import { AudioCaptureInterface, MicrophoneDevice, SttResult } from '../types/audio-processor';
+import { AudioCaptureInterface, MicrophoneDevice } from '../types/audio-processor';
 import { logDebug, logError } from '../utils/logger';
+
+// 导入Tauri API服务
+import { tauriApi } from './tauriApi';
 
 /**
  * 音频捕获服务
@@ -37,11 +39,31 @@ class AudioCaptureService implements AudioCaptureInterface {
   // 获取可用的麦克风设备列表
   async getAvailableMicrophones(): Promise<MicrophoneDevice[]> {
     try {
+      // 检查浏览器是否支持 mediaDevices API
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('浏览器不支持 mediaDevices API 或 getUserMedia');
+      }
+
+      // 检查是否在安全上下文中 (HTTPS 或 localhost)
+      if (!window.isSecureContext) {
+        logError('需要在安全上下文 (HTTPS/localhost) 中才能访问麦克风');
+        throw new Error('需要在安全上下文中才能访问麦克风');
+      }
+
+      logDebug('开始请求麦克风权限...');
+      
       // 首先请求麦克风权限，否则设备列表中的标签可能为空
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // 立即停止流，我们只是为了获取权限
+      stream.getTracks().forEach(track => track.stop());
+      
+      logDebug('麦克风权限获取成功，开始枚举设备...');
       
       // 获取所有媒体设备
       const devices = await navigator.mediaDevices.enumerateDevices();
+      
+      logDebug('枚举到的所有设备:', devices);
       
       // 过滤出音频输入设备（麦克风）
       const microphones = devices
@@ -56,6 +78,20 @@ class AudioCaptureService implements AudioCaptureInterface {
       return microphones;
     } catch (error) {
       logError('获取麦克风列表失败', error);
+      
+      // 提供更详细的错误信息
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          logError('用户拒绝了麦克风访问权限');
+        } else if (error.name === 'NotFoundError') {
+          logError('没有找到可用的麦克风设备');
+        } else if (error.name === 'NotSupportedError') {
+          logError('浏览器不支持麦克风访问');
+        } else if (error.name === 'SecurityError') {
+          logError('安全错误：可能需要 HTTPS 连接');
+        }
+      }
+      
       return [];
     }
   }
@@ -316,9 +352,9 @@ class AudioCaptureService implements AudioCaptureInterface {
             // 限制调用频率，避免过于频繁的调用
             const now = Date.now();
 
-            // 只有当RealTimeVad组件拥有控制权时，才发送数据到Rust后端
-            // if (this.currentComponent === 'RealTimeVad' && now - this.lastProcessingTime > 40) {
-            if (this.currentComponent === 'RealTimeVad') {
+            // 支持多个组件发送音频数据到Rust后端进行VAD处理
+            const vadEnabledComponents = ['RealTimeVad', 'AudioPlayback'];
+            if (vadEnabledComponents.includes(this.currentComponent || '')) {
               // console.log('调用Rust处理音频');
               this.lastProcessingTime = now;
               
@@ -326,7 +362,7 @@ class AudioCaptureService implements AudioCaptureInterface {
               const audioArray = Array.from(event.data.audioData);
               
               // 调用Rust后端处理音频，并接收返回的VAD事件
-              const eventResult = await invoke<string>('process_audio_frame', {
+              const eventResult = await tauriApi.invoke('process_audio_frame', {
                 audioData: audioArray
               });
               
@@ -359,12 +395,7 @@ class AudioCaptureService implements AudioCaptureInterface {
       // 为了低延迟，我们不连接到destination
       
       // 启动STT结果监听器
-      try {
-        await invoke('start_stt_result_listener');
-        logDebug('STT结果监听器启动成功');
-      } catch (error) {
-        logError('启动STT结果监听器失败', error);
-      }
+      await this.startSttResultListener();
       
       this.isInitialized = true;
       logDebug('音频捕获初始化成功');
@@ -573,10 +604,11 @@ class AudioCaptureService implements AudioCaptureInterface {
       this.stopRecording(componentName);
     }
     
-    // 如果是RealTimeVad组件请求停止，尝试停止正在进行的VAD处理
-    if (requestingComponent === 'RealTimeVad') {
+    // 如果是支持VAD的组件请求停止，尝试停止正在进行的VAD处理
+    const vadEnabledComponents = ['RealTimeVad', 'AudioPlayback'];
+    if (vadEnabledComponents.includes(requestingComponent)) {
       logDebug('尝试停止正在进行的VAD处理');
-      invoke('stop_vad_processing').catch(e => {
+      tauriApi.invoke('stop_vad_processing').catch((e: any) => {
         logError('停止VAD处理失败', e);
       });
     }
@@ -642,6 +674,33 @@ class AudioCaptureService implements AudioCaptureInterface {
     }));
     
     return true;
+  }
+
+  /**
+   * 启动STT结果监听器，带重试机制
+   */
+  private async startSttResultListener(maxRetries = 3): Promise<void> {
+    let retryCount = 0;
+    
+    while (retryCount < maxRetries) {
+      try {
+        await tauriApi.invoke('start_stt_result_listener');
+        logDebug('STT结果监听器启动成功');
+        return; // 成功启动，退出循环
+      } catch (error) {
+        retryCount++;
+        logError(`启动STT结果监听器失败 (尝试 ${retryCount}/${maxRetries})`, error);
+        
+        if (retryCount < maxRetries) {
+          // 等待一段时间再重试
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        } else {
+          // 所有重试都失败了
+          logError('STT结果监听器启动失败，已达到最大重试次数');
+          throw new Error('无法启动STT结果监听器');
+        }
+      }
+    }
   }
 }
 

@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "name": "Lumina Root",
+      "path": "."
+    },
+    {
+      "name": "Tauri App",
+      "path": "./frontend/src-tauri"
+    }
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": [
+      "./frontend/src-tauri/Cargo.toml"
+    ]
+  },
+  "extensions": {
+    "recommendations": [
+      "rust-lang.rust-analyzer",
+      "tauri-apps.tauri-vscode",
+      "bradlc.vscode-tailwindcss"
+    ]
+  }
+} 
