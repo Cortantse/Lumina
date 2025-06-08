@@ -1,4 +1,5 @@
 import uuid
+import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict
 
@@ -104,4 +105,21 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             await pipeline_service.end_stt_session()
         except Exception as e:
-            print(f"结束STT会话失败: {e}") 
+            print(f"结束STT会话失败: {e}")
+
+
+@router.websocket("/ws/silence")
+async def websocket_silence(websocket: WebSocket):
+    """接收前端静音时长事件"""
+    await websocket.accept()
+    try:
+        async for text in websocket.iter_text():
+            try:
+                data = json.loads(text)
+                duration = data.get("silence_ms")
+                if duration is not None:
+                    print(f"收到静音时长: {duration}ms")
+            except Exception as e:
+                print(f"处理静音事件失败: {e}")
+    except WebSocketDisconnect:
+        pass
