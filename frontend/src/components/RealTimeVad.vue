@@ -126,12 +126,53 @@ const latencyMs = ref(0);
 const textHistory = ref<string[]>([]);
 const speechStartTime = ref<number | null>(null);
 
+// --- 静音上报相关变量 ---
+let silenceSocket: WebSocket | null = null;
+let silenceTimer: number | null = null;
+let silenceStart: number | null = null;
+
 // 获取全局属性
 const app = getCurrentInstance();
 const audioCapture = app?.appContext.config.globalProperties.$audioCapture as AudioCaptureInterface | undefined;
 
 // 检查全局状态的定时器引用
 let statusCheckInterval: number | null = null;
+
+// 连接后端用于上报静音时长的 WebSocket
+function connectSilenceSocket() {
+  silenceSocket = new WebSocket('ws://localhost:8000/api/v1/ws/silence');
+  silenceSocket.onopen = () => {
+    console.log('[RealTimeVad] 静音上报 WebSocket 已连接');
+  };
+  silenceSocket.onerror = (e) => {
+    console.error('[RealTimeVad] 静音 WebSocket 错误', e);
+  };
+  silenceSocket.onclose = () => {
+    console.log('[RealTimeVad] 静音上报 WebSocket 已关闭');
+  };
+}
+
+function startSilenceReporting() {
+  if (!silenceSocket || silenceSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  if (silenceTimer) return;
+  silenceStart = Date.now();
+  silenceTimer = window.setInterval(() => {
+    if (silenceSocket && silenceSocket.readyState === WebSocket.OPEN && silenceStart) {
+      const duration = Date.now() - silenceStart;
+      silenceSocket.send(JSON.stringify({ silence_ms: duration }));
+    }
+  }, 20);
+}
+
+function stopSilenceReporting() {
+  if (silenceTimer) {
+    clearInterval(silenceTimer);
+    silenceTimer = null;
+  }
+  silenceStart = null;
+}
 
 // 请求音频控制权
 const requestAudioControl = async (): Promise<boolean> => {
@@ -252,6 +293,9 @@ onMounted(() => {
   statusCheckInterval = window.setInterval(() => {
     syncWithGlobalCapture();
   }, 1000); // 每秒检查一次
+
+  // 建立静音上报 WebSocket
+  connectSilenceSocket();
 });
 
 // 同步与全局音频捕获的状态
@@ -316,6 +360,13 @@ onUnmounted(() => {
     clearInterval(statusCheckInterval);
     statusCheckInterval = null;
   }
+
+  // 关闭静音上报 WebSocket
+  if (silenceSocket) {
+    silenceSocket.close();
+    silenceSocket = null;
+  }
+  stopSilenceReporting();
   
   // 如果当前组件有控制权，则释放
   if (hasAudioControl.value && audioCapture) {
@@ -546,10 +597,12 @@ function handleVadEvent(event: CustomEvent) {
     // 记录语音开始时间，用于计算延迟
     speechStartTime.value = Date.now();
     console.log("[RealTimeVad] 检测到语音开始");
+    stopSilenceReporting();
   } else if (vadEvent === VadEventType.SpeechEnd) {
     isSpeaking.value = false;
     speechStartTime.value = null;
     console.log("[RealTimeVad] 检测到语音结束，语音段应已保存");
+    startSilenceReporting();
   } else if (vadEvent === VadEventType.Processing) {
     processedFrames.value++;
   }
