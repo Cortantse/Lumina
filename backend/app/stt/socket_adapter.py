@@ -11,6 +11,7 @@ from typing import List
 
 from app.protocols.stt import AudioData, STTResponse
 from app.stt.alicloud_client import AliCloudSTTAdapter
+from app.api.v1.control import ControlMessageHandler
 
 
 class SocketSTTHandler:
@@ -251,8 +252,17 @@ class SocketSTTHandler:
                         print(f"【调试】客户端 {client_id} 连接已关闭或读取长度失败")
                         return
                     
-                    # 解析音频数据长度（样本数）
-                    audio_length = struct.unpack("<I", length_bytes)[0]
+                    # 解析长度字段
+                    length_value = struct.unpack("<I", length_bytes)[0]
+                    
+                    # 检查是否是特殊控制消息
+                    if length_value == 0xFFFFFFFF:
+                        # 这是一个控制消息，使用控制消息处理器
+                        await ControlMessageHandler.handle_control_message(client, client_id, loop)
+                        continue
+                    
+                    # 正常的音频数据长度（样本数）
+                    audio_length = length_value
                     # print(f"【调试】接收音频数据包，包含{audio_length}个样本 (共{audio_length * 2}字节)")
                     
                     # 直接读取音频数据（每个i16样本占2字节）
@@ -449,7 +459,7 @@ class SocketSTTHandler:
             response: 包含识别文本和是否为最终结果的响应对象
         """
         if not self.result_client:
-            print("【警告】尝试发送识别结果，但结果接收器未连接")
+            # print("【警告】尝试发送识别结果，但结果接收器未连接")
             return
             
         try:

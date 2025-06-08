@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>本应用需要麦克风权限以进行语音识别和音频处理功能。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>本应用需要摄像头权限以支持多媒体功能。</string>
+</dict>
+</plist> 
