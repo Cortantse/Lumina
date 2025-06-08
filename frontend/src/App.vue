@@ -4,9 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import RealTimeVad from "./components/RealTimeVad.vue";
 import VadPlayback from "./components/VadPlayback.vue";
+import SiriWave from "./components/SiriWave.vue";
 
 const greetMsg = ref("");
 const name = ref("");
+const waveMode = ref<'idle' | 'listening' | 'speaking'>('idle');
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -18,6 +20,18 @@ async function greet() {
   <main class="container">
     <h1>语音识别测试</h1>
     
+    <div class="feature-section siri-section">
+      <h2>Siri 律动小球</h2>
+      <div class="siri-controls">
+        <button @click="waveMode = 'idle'" :class="{ active: waveMode === 'idle' }">待机</button>
+        <button @click="waveMode = 'listening'" :class="{ active: waveMode === 'listening' }">聆听</button>
+        <button @click="waveMode = 'speaking'" :class="{ active: waveMode === 'speaking' }">说话</button>
+      </div>
+      <div class="siri-container">
+        <SiriWave :mode="waveMode" />
+      </div>
+    </div>
+
     <div class="feature-section">
       <h2>实时 VAD (语音活动检测)</h2>
       <RealTimeVad />
@@ -55,11 +69,39 @@ async function greet() {
 
 <style scoped>
 .feature-section {
-  margin: 30px 0;
+  margin: 20px 0;
   padding: 20px;
   background-color: #f9f9f9;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.siri-section {
+  text-align: center;
+}
+
+.siri-controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.siri-controls button.active {
+  background-color: #007aff;
+  color: white;
+  border-color: #007aff;
+}
+
+.siri-container {
+  height: 300px;
+  width: 100%;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
 .logos {
@@ -93,7 +135,7 @@ async function greet() {
 
 .container {
   margin: 0;
-  padding-top: 10vh;
+  padding-top: 5vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
