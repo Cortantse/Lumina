@@ -325,7 +325,7 @@ class UnixSocketSTTHandler:
     async def _send_result(self, response: STTResponse) -> None:
         """发送识别结果到结果Socket"""
         if not self.result_client:
-            print("【警告】尝试发送识别结果，但结果接收器未连接")
+            # print("【警告】尝试发送识别结果，但结果接收器未连接")
             return
             
         try:

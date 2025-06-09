@@ -174,7 +174,7 @@ impl VadStateMachine {
             
             // 在等待中状态继续静音
             (VadState::Waiting, VadStateMachineEvent::SilenceFrame) => {
-                true // 继续不发送音频帧，静音上报继续进行  # 暂时也发送音频帧
+                true // 继续不发送音频帧，静音上报继续进行  
             },
             
             // 在初始状态的静音帧
@@ -273,10 +273,8 @@ impl VadStateMachine {
             
             // 在说话中状态收到音频播放事件 - 转为听音中状态
             (VadState::Speaking, VadStateMachineEvent::AudioPlaybackStart) => {
-                println!("[状态机] 说话中 -> 听音中 (后端音频开始播放)");
-                self.current_state = VadState::Listening;
-                self.stop_silence_reporting();
-                false // 停止发送音频帧
+                println!("[状态机] 忽略音频播放事件 (用户正在说话)");
+                true // 继续发送音频帧
             },
             
             // 在听音中状态收到音频播放开始 - 保持状态
