@@ -17,6 +17,6 @@ mid_silence_timeout = 1000 # 中静默时间，单位：毫秒, 提示用户 我
 long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush 当前会话
 
 # stt 参数
-max_sentence_silence = 200 # 最大句子静默时间，单位：毫秒
+max_sentence_silence = 100 # 最大句子静默时间，单位：毫秒
 max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
 max_end_silence = 500 # 最大结束静默时间，单位：毫秒

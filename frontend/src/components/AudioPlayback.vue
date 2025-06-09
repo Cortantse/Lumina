@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onMounted, getCurrentInstance, computed, watch } from 'vue';
+import { ref, onUnmounted, onMounted, getCurrentInstance, watch } from 'vue';
 import { tauriApi } from '../services/tauriApi';
 import { AudioCaptureInterface, MicrophoneDevice, VadEventType } from '../types/audio-processor';
 import SiriWave from './SiriWave.vue';
@@ -622,7 +622,7 @@ watch([currentStateMachineState, isPlayingBackendAudio], ([state, playingAudio])
 });
 
 // --- 音频分析功能 ---
-let audioAnalysisInterval: ReturnType<typeof setInterval> | null = null;
+// let audioAnalysisInterval: ReturnType<typeof setInterval> | null = null;
 
 // 处理音频特征更新
 function handleAudioFeatures(features: AudioFeatures) {

@@ -9,7 +9,7 @@ class BackendAudioPlayerService {
   private audioElement: HTMLAudioElement | null = null;
   private audioQueue: Blob[] = [];
   private isPlaying: boolean = false;
-  private audioContext: AudioContext | null = null;
+  // private audioContext: AudioContext | null = null;
   
   constructor() {
     // 创建音频元素

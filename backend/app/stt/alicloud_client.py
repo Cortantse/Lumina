@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import nls
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
-from app.core.config import config
+import app.core.config as config
 from app.protocols.stt import STTClient, AudioData, STTResponse
 
 
