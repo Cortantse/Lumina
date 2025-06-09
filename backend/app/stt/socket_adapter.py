@@ -459,7 +459,7 @@ class SocketSTTHandler:
             response: 包含识别文本和是否为最终结果的响应对象
         """
         if not self.result_client:
-            # print("【警告】尝试发送识别结果，但结果接收器未连接")
+            print("【警告】尝试发送识别结果，但结果接收器未连接")
             return
             
         try:

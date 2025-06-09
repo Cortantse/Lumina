@@ -702,6 +702,318 @@ class AudioCaptureService implements AudioCaptureInterface {
       }
     }
   }
+
+  // 使用自定义音频流初始化音频捕获
+  async initWithCustomStream(stream: MediaStream, componentId?: string): Promise<void> {
+    // 如果请求来自非当前组件，记录并等待
+    if (componentId && this.currentComponent && componentId !== this.currentComponent) {
+      logDebug(`组件 ${componentId} 请求初始化自定义流，但当前由 ${this.currentComponent} 占用`);
+      this.pendingComponentRequest = componentId;
+      return;
+    }
+    
+    // 更新当前组件标识
+    if (componentId) {
+      this.currentComponent = componentId;
+      logDebug(`组件 ${componentId} 获取音频控制权(自定义流)`);
+    }
+    
+    if (this.isInitialized) {
+      logDebug('音频捕获已初始化，先停止当前捕获');
+      this.stop();
+    }
+    
+    try {
+      logDebug('开始使用自定义流初始化音频捕获');
+      
+      // 保存自定义流
+      this.stream = stream;
+      logDebug('使用自定义音频流', { tracks: this.stream.getAudioTracks().length });
+      
+      // 创建音频上下文，尝试与输入流保持相同采样率
+      const trackSettings = stream.getAudioTracks()[0]?.getSettings();
+      const streamSampleRate = trackSettings?.sampleRate || 16000;
+      this.context = new AudioContext({ sampleRate: streamSampleRate });
+      logDebug('音频上下文创建成功', { sampleRate: this.context.sampleRate });
+      
+      // 加载音频处理器模块 (从 public 目录)
+      logDebug('开始加载音频处理器模块');
+      await this.context.audioWorklet.addModule('/audio-processor.js');
+      logDebug('音频处理器模块加载成功');
+      
+      // 创建媒体源
+      const source = this.context.createMediaStreamSource(this.stream);
+      logDebug('媒体源创建成功');
+      
+      // 创建工作节点
+      this.workletNode = new AudioWorkletNode(this.context, 'audio-capture-processor');
+      logDebug('音频工作节点创建成功');
+      this.frameCount = 0;
+      this.errorCount = 0;
+      
+      // 创建用于实时播放的音频节点
+      this.audioBufferSource = null;
+      this.directPlaybackNode = this.context.createGain();
+      this.directPlaybackNode.gain.value = 1.0;
+      this.directPlaybackNode.connect(this.context.destination);
+      
+      // 初始化实时播放缓冲区
+      this.realtimePlaybackBuffer = [];
+      
+      // 处理从AudioWorklet收到的消息 (与init相同的处理逻辑)
+      this.workletNode.port.onmessage = async (event) => {
+        if (event.data.type === 'frame') {
+          // 增加帧计数
+          this.frameCount++;
+          
+          try {
+            // 如果处于录音状态，缓存音频帧
+            if (this.isRecording) {
+              // 克隆音频数据以便后续播放
+              const frameClone = new Float32Array(event.data.audioData);
+              this.cachedAudioFrames.push(frameClone);
+              
+              if (this.cachedAudioFrames.length % 50 === 0) {
+                logDebug(`已缓存 ${this.cachedAudioFrames.length} 帧音频数据`);
+              }
+              
+              // 缓冲区实时播放机制 (同init方法中的实现)
+              if (this.isDirectPlaybackEnabled && this.context && this.context.state === 'running' && this.directPlaybackNode) {
+                // 添加到实时播放缓冲区
+                this.realtimePlaybackBuffer.push(frameClone);
+                
+                // 当积累足够的帧时，进行一次播放
+                if (this.realtimePlaybackBuffer.length >= this.realtimePlaybackBufferSize && !this.isPlaybackScheduled) {
+                  this.isPlaybackScheduled = true;
+                  
+                  // 计算缓冲区总长度
+                  const totalLength = this.realtimePlaybackBuffer.reduce((sum, frame) => sum + frame.length, 0);
+                  
+                  // 创建合并缓冲区
+                  const combinedBuffer = new Float32Array(totalLength);
+                  
+                  // 复制数据到合并缓冲区
+                  let offset = 0;
+                  for (const frame of this.realtimePlaybackBuffer) {
+                    combinedBuffer.set(frame, offset);
+                    offset += frame.length;
+                  }
+                  
+                  // 创建音频缓冲区
+                  const audioBuffer = this.context.createBuffer(1, combinedBuffer.length, this.context.sampleRate);
+                  audioBuffer.getChannelData(0).set(combinedBuffer);
+                  
+                  // 创建音源并连接到输出
+                  const source = this.context.createBufferSource();
+                  source.buffer = audioBuffer;
+                  source.connect(this.directPlaybackNode);
+                  
+                  // 播放结束后清理
+                  source.onended = () => {
+                    this.isPlaybackScheduled = false;
+                  };
+                  
+                  // 开始播放
+                  source.start();
+                  
+                  // 清空缓冲区，但保留最后一帧用于平滑过渡
+                  if (this.realtimePlaybackBuffer.length > 1) {
+                    const lastFrame = this.realtimePlaybackBuffer[this.realtimePlaybackBuffer.length - 1];
+                    this.realtimePlaybackBuffer = [lastFrame];
+                  } else {
+                    this.realtimePlaybackBuffer = [];
+                  }
+                }
+              }
+            }
+            
+            // 每帧数据发送到Rust后端处理
+            // 限制调用频率，避免过于频繁的调用
+            const now = Date.now();
+            
+            // 支持多个组件发送音频数据到Rust后端进行VAD处理
+            const vadEnabledComponents = ['RealTimeVad', 'AudioPlayback'];
+            if (vadEnabledComponents.includes(this.currentComponent || '')) {
+              this.lastProcessingTime = now;
+              
+              // 检查音频数据是否有效
+              const audioArray = Array.from(event.data.audioData);
+              
+              // 调用Rust后端处理音频，并接收返回的VAD事件
+              const eventResult = await tauriApi.invoke('process_audio_frame', {
+                audioData: audioArray
+              });
+              
+              if (eventResult !== 'Processing') {
+                logDebug('处理结果', { eventResult });
+              }
+            }
+          } catch (e) {
+            this.errorCount++;
+            logError(`发送音频帧失败 (${this.errorCount})`, e);
+            
+            // 如果错误太多，重新初始化
+            if (this.errorCount > 20) {
+              logError('错误次数过多，准备重新初始化音频捕获');
+              this.stop();
+              // 短暂延迟后重新初始化
+              setTimeout(() => {
+                // 确保当currentComponent为null时传递undefined
+                this.initWithCustomStream(stream, this.currentComponent || undefined);
+              }, 1000);
+            }
+          }
+        }
+      };
+      
+      // 连接音频处理链
+      source.connect(this.workletNode);
+      logDebug('音频处理链连接成功(自定义流)');
+      
+      // 启动STT结果监听器
+      await this.startSttResultListener();
+      
+      this.isInitialized = true;
+      logDebug('使用自定义流的音频捕获初始化成功');
+      
+      // 发送自定义流初始化事件
+      window.dispatchEvent(new CustomEvent('custom-stream-initialized', { 
+        detail: { 
+          success: true,
+          isInitializing: true,
+          component: this.currentComponent
+        } 
+      }));
+    } catch (error) {
+      logError('使用自定义流初始化音频捕获失败', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取录制的音频数据Blob
+   * @returns 返回录制音频的Blob对象，如果没有录制数据则返回null
+   */
+  async getRecordedAudioBlob(): Promise<Blob | null> {
+    try {
+      if (this.cachedAudioFrames.length === 0) {
+        logDebug('没有缓存的音频数据');
+        return null;
+      }
+      
+      logDebug(`准备将 ${this.cachedAudioFrames.length} 帧音频数据转换为Blob`);
+      
+      // 如果音频上下文已关闭，创建一个新的
+      const context = this.context || new AudioContext({ sampleRate: 16000 });
+      
+      // 计算总长度
+      const totalLength = this.cachedAudioFrames.reduce((sum, frame) => sum + frame.length, 0);
+      
+      // 创建一个新的Float32Array存储所有帧
+      const combinedBuffer = new Float32Array(totalLength);
+      
+      // 复制数据
+      let offset = 0;
+      for (const frame of this.cachedAudioFrames) {
+        combinedBuffer.set(frame, offset);
+        offset += frame.length;
+      }
+      
+      // 创建AudioBuffer
+      const audioBuffer = context.createBuffer(1, combinedBuffer.length, context.sampleRate);
+      audioBuffer.getChannelData(0).set(combinedBuffer);
+      
+      // 转换AudioBuffer为WAV格式Blob
+      const blob = await this.audioBufferToWavBlob(audioBuffer);
+      logDebug(`音频转换为Blob成功，大小: ${(blob.size / 1024).toFixed(2)} KB`);
+      
+      return blob;
+    } catch (error) {
+      logError('获取录制音频Blob失败', error);
+      return null;
+    }
+  }
+
+  /**
+   * 将AudioBuffer转换为WAV格式的Blob
+   * @param audioBuffer 要转换的AudioBuffer
+   * @returns 返回WAV格式的Blob
+   */
+  private audioBufferToWavBlob(audioBuffer: AudioBuffer): Promise<Blob> {
+    return new Promise((resolve) => {
+      // 获取采样率和通道数
+      const sampleRate = audioBuffer.sampleRate;
+      const numberOfChannels = audioBuffer.numberOfChannels;
+      const length = audioBuffer.length;
+      
+      // 创建交错的音频数据
+      const interleaved = new Float32Array(length * numberOfChannels);
+      let index = 0;
+      
+      // 交错不同通道的样本
+      for (let i = 0; i < length; i++) {
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          interleaved[index++] = audioBuffer.getChannelData(channel)[i];
+        }
+      }
+      
+      // 将Float32转换为16位整数
+      const dataLength = interleaved.length;
+      const buffer = new ArrayBuffer(44 + dataLength * 2); // 44字节的WAV头部 + 数据
+      const view = new DataView(buffer);
+      
+      // 写入WAV头部
+      // RIFF标识
+      this.writeString(view, 0, 'RIFF');
+      // 文件长度
+      view.setUint32(4, 36 + dataLength * 2, true);
+      // WAVE标识
+      this.writeString(view, 8, 'WAVE');
+      // fmt子块标识
+      this.writeString(view, 12, 'fmt ');
+      // 子块长度
+      view.setUint32(16, 16, true);
+      // 音频格式 (1表示PCM)
+      view.setUint16(20, 1, true);
+      // 通道数
+      view.setUint16(22, numberOfChannels, true);
+      // 采样率
+      view.setUint32(24, sampleRate, true);
+      // 字节率 (采样率 * 通道数 * 每个样本的字节数)
+      view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+      // 块对齐 (通道数 * 每个样本的字节数)
+      view.setUint16(32, numberOfChannels * 2, true);
+      // 每个样本的位数
+      view.setUint16(34, 16, true);
+      // data子块标识
+      this.writeString(view, 36, 'data');
+      // 数据长度
+      view.setUint32(40, dataLength * 2, true);
+      
+      // 写入音频数据
+      let offset = 44;
+      for (let i = 0; i < dataLength; i++) {
+        // 将float转换为16位int
+        const sample = Math.max(-1, Math.min(1, interleaved[i]));
+        const val = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        view.setInt16(offset, val, true);
+        offset += 2;
+      }
+      
+      // 创建Blob
+      const blob = new Blob([buffer], { type: 'audio/wav' });
+      resolve(blob);
+    });
+  }
+
+  /**
+   * 在DataView中写入字符串
+   */
+  private writeString(view: DataView, offset: number, string: string): void {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
 }
 
 // 创建单例实例

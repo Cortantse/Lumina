@@ -1,0 +1,42 @@
+@startuml
+left to right direction
+skinparam shadowing false
+skinparam state {
+  BorderColor #34495E
+  FontColor #2C3E50
+  FontSize 12
+}
+skinparam arrowColor #34495E
+
+'—— 各状态背景色 ——  
+skinparam stateBackgroundColor<<Init>>   #ECECEC  
+skinparam stateBackgroundColor<<Speak>>  #E8F6F3  
+skinparam stateBackgroundColor<<Wait>>   #FEF9E7  
+skinparam stateBackgroundColor<<Listen>> #E8F4FC  
+
+'—— 状态 ——  
+state "Initial\n(初始)"    as Initial   <<Init>>  
+state "Speaking\n(说话中)" as Speaking  <<Speak>>  
+state "Waiting\n(等待中)"   as Waiting   <<Wait>>  
+state "Listening\n(听音中)" as Listening <<Listen>>  
+
+[*] --> Initial
+
+'—— 初始 状态 ——  
+Initial --> Speaking  : VoiceFrame  
+Initial --> Listening : AudioPlaybackStart  
+
+'—— 说话中 状态 ——  
+Speaking --> Waiting : SilenceFrame [count ≥ max_silence_frames]  
+Speaking --> Initial : BackendEndSession\nBackendResetToInitial  
+Speaking --> Listening : AudioPlaybackStart
+
+'—— 等待中 状态 ——  
+Waiting --> Speaking  : VoiceFrame\nsend_pre_context_frames()  
+Waiting --> Listening : AudioPlaybackStart  
+Waiting --> Initial   : BackendEndSession\nBackendResetToInitial  
+
+'—— 听音中 状态 ——  
+Listening --> Speaking : VoiceFrame\nsend_pre_context_frames()  
+Listening --> Initial  : AudioPlaybackEnd\nBackendEndSession\nBackendResetToInitial  
+@enduml

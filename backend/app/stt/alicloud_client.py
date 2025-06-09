@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import nls
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
-
+from app.core.config import config
 from app.protocols.stt import STTClient, AudioData, STTResponse
 
 
@@ -208,15 +208,15 @@ class AliCloudSTTAdapter(STTClient):
                         # 语音断句检测阈值，静音时长超过该阈值会被认为断句
                         # 范围：200-6000ms，默认800ms
                         # 注意：启用语义断句后此参数无效
-                        "max_sentence_silence": 200,
+                        "max_sentence_silence": config.max_sentence_silence,
                         
                         # 允许单句话最大结束时间，最小值5000ms，默认60000ms
                         # 超过此时间会强制结束当前句子
-                        "max_single_segment_time": 30000,
+                        "max_single_segment_time": config.max_single_segment_time,
                         
                         # 允许的最大结束静音，取值范围：200-6000ms，默认800ms
                         # 控制句子结束时的静音检测敏感度
-                        "max_end_silence": 500
+                        "max_end_silence": config.max_end_silence
                     }
                 )
                 print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")

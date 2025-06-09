@@ -3,18 +3,60 @@ States:
     初始: 什么都不干，只是激活 vad 组件
     说话中: 发送音频帧给后端，vad 计时保持清零
     等待中: 不发送音频帧，只发送静音上报事件
-Events: 麦克风一帧有声音， 麦克风多帧无声音， 后端结束session
+    听音中: 播放后端音频，前端暂停录音
 
-2. 使用表格或简洁的"转移规则"写法表达状态转移
-on(麦克风一帧有声音) from(初始) to(说话中)
-on(麦克风5帧无声音) from(说话中) to(等待中)
-on(麦克风一帧有声音) from(等待中) to(说话中) + 发送前置5帧
-on(后端结束session) from(等待中) to(初始)
-on(后端结束session) from(说话中) to(初始)
+Events: 
+    麦克风一帧有声音 (VoiceFrame)
+    麦克风多帧无声音 (MultiSilenceFrame)
+    后端结束session (BackendEndSession)
+    后端请求重置 (BackendResetToInitial)
+    后端音频开始播放 (AudioPlaybackStart)
+    后端音频播放结束 (AudioPlaybackEnd)
 
-3. 关键改进
-- 移除了PostContext状态，简化状态机逻辑
-- 从说话中直接转换到等待中，需要连续5帧无声音
-- 从等待中回到说话中时，自动发送前置5帧保持上下文连续性
-- 支持在任何活跃状态下处理后端结束session事件
+2. 状态转移规则
+
+初始状态的转移:
+    on(麦克风一帧有声音) from(初始) to(说话中)
+    on(后端音频开始播放) from(初始) to(听音中)
+
+说话中状态的转移:
+    on(麦克风多帧无声音) from(说话中) to(等待中) [当连续静音帧计数 >= max_silence_frames]
+    on(后端结束session) from(说话中) to(初始)  
+    on(后端请求重置) from(说话中) to(初始)
+    on(后端音频开始播放) from(说话中) to(听音中) 
+
+等待中状态的转移:
+    on(麦克风一帧有声音) from(等待中) to(说话中) + 发送前置上下文帧
+    on(后端结束session) from(等待中) to(初始)
+    on(后端请求重置) from(等待中) to(初始)
+    on(后端音频开始播放) from(等待中) to(听音中)
+
+听音中状态的转移:
+    on(麦克风一帧有声音) from(听音中) to(说话中) + 发送前置上下文帧    [用户打断]
+    on(后端音频播放结束) from(听音中) to(初始)
+    on(后端结束session) from(听音中) to(初始)
+    on(后端请求重置) from(听音中) to(初始)
+
+3. 前端 sirl 状态机
+注意：
+    vue 前端的状态 和 rust 后端的状态是反的，rust 的主体是用户，vue的主体是Lumina
+
+
+States:
+    idle: 空闲状态
+    listening: Lumina 正在听
+    speaking: Lumina 正在说话
+
+对应规则[sirl状态机直接对应 rust 状态进行互换]:
+    idle = 初始
+    listening = 说话中/等待中
+    speaking = 听音中
+
+    
+
+
+
+
+
+
 
