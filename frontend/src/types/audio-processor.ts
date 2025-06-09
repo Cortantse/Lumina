@@ -178,6 +178,19 @@ export interface AudioCaptureInterface {
   clearRecordedAudio(componentName?: string): boolean;
   
   /**
+   * 使用自定义音频流初始化音频捕获
+   * @param stream 自定义的MediaStream对象
+   * @param componentId 组件ID
+   */
+  initWithCustomStream(stream: MediaStream, componentId?: string): Promise<void>;
+  
+  /**
+   * 获取录制的音频数据Blob
+   * @returns 返回录制音频的Blob对象，如果没有录制数据则返回null
+   */
+  getRecordedAudioBlob(): Promise<Blob | null>;
+  
+  /**
    * 切换实时播放状态
    * @param enable 可选，直接指定是否启用，不传则切换当前状态
    * @returns 切换后的状态

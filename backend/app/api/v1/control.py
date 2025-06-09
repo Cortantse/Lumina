@@ -115,7 +115,7 @@ class ControlMessageHandler:
             silence_bytes = await loop.sock_recv(client, 8)
             if len(silence_bytes) == 8:
                 silence_duration = struct.unpack("<Q", silence_bytes)[0]
-                # print("*", end='')
+                # print(f"【重要】收到静音事件 (客户端 {client_id}): {silence_duration}ms")
                 
                 # 这里可以添加更多的静音事件处理逻辑
                 # 比如记录静音时长、触发特定动作等

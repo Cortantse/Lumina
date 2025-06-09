@@ -56,15 +56,67 @@
         id="microphone-select" 
         v-model="selectedMicrophoneId"
         @change="onMicrophoneChange"
-        :disabled="isVadActive"
+        :disabled="isVadActive || isSimulatedMicActive"
       >
         <option v-for="mic in availableMicrophones" :key="mic.deviceId" :value="mic.deviceId">
           {{ mic.label }} {{ mic.isDefault ? '(默认)' : '' }}
         </option>
       </select>
-      <button class="refresh-button" @click="refreshMicrophoneList" :disabled="isVadActive">
+      <button class="refresh-button" @click="refreshMicrophoneList" :disabled="isVadActive || isSimulatedMicActive">
         刷新
       </button>
+    </div>
+
+    <!-- 模拟麦克风控制 -->
+    <div class="simulated-mic-controls">
+      <div class="sim-mic-header">
+        <h4>模拟麦克风</h4>
+        <span class="sim-mic-status" :class="{ 'active': isSimulatedMicActive }">
+          {{ isSimulatedMicActive ? '已启用' : '未启用' }}
+        </span>
+      </div>
+      
+      <div class="sim-mic-actions">
+        <button 
+          @click="toggleSimulatedMic" 
+          :class="{ 'active': isSimulatedMicActive }"
+          :disabled="isVadActive && !isSimulatedMicActive"
+        >
+          {{ isSimulatedMicActive ? '停用模拟麦克风' : '启用模拟麦克风' }}
+        </button>
+
+        <button 
+          v-if="!hasRecordedAudio" 
+          @click="startRecordingSimAudio" 
+          :disabled="isRecordingSimAudio || isVadActive || isSimulatedMicActive"
+          :class="{ 'recording': isRecordingSimAudio }"
+        >
+          {{ isRecordingSimAudio ? '正在录制...' : '录制新的模拟音频' }}
+        </button>
+        
+        <button 
+          v-if="isRecordingSimAudio" 
+          @click="stopRecordingSimAudio"
+        >
+          停止录制
+        </button>
+        
+        <button 
+          v-if="hasRecordedAudio && !isRecordingSimAudio" 
+          @click="playRecordedSimAudio"
+          :disabled="isSimulatedMicActive"
+        >
+          预览录制音频
+        </button>
+        
+        <button 
+          v-if="hasRecordedAudio && !isRecordingSimAudio" 
+          @click="deleteRecordedSimAudio"
+          :disabled="isSimulatedMicActive"
+        >
+          删除录制音频
+        </button>
+      </div>
     </div>
 
     <!-- 语音识别结果区域 -->
@@ -167,6 +219,17 @@ const hasGlobalRecording = ref(false);
 const debug = ref(false); // 调试模式开关
 const errorLog = ref<string[]>([]);
 const speechStartTime = ref<number | null>(null);
+
+// --- 模拟麦克风相关状态 ---
+const isSimulatedMicActive = ref(false);
+const hasRecordedAudio = ref(false);
+const isRecordingSimAudio = ref(false);
+const simulatedAudioBuffer = ref<AudioBuffer | null>(null);
+const simulatedAudioContext = ref<AudioContext | null>(null);
+const simulatedAudioNode = ref<AudioNode | null>(null);
+const simulatedAudioSourceNode = ref<AudioBufferSourceNode | null>(null);
+const simulatedAudioDestination = ref<MediaStreamAudioDestinationNode | null>(null);
+const simulatedMicStream = ref<MediaStream | null>(null);
 
 // --- 事件监听器 ---
 
@@ -327,27 +390,59 @@ async function toggleAudioCapture(forceStop: boolean = false) {
       
     } else {
       // --- 开始逻辑 ---
-      const controlSuccess = await requestAudioControl();
-      if (!controlSuccess) {
-        statusText.value = '无法获取音频控制权';
-        return;
+      
+      // 根据是否使用模拟麦克风来决定使用哪种音频源
+      if (isSimulatedMicActive.value && simulatedMicStream.value) {
+        // 使用模拟麦克风
+        console.log("[AudioPlayback] 使用模拟麦克风开始识别");
+        
+        // 请求音频控制权
+        const controlSuccess = await requestAudioControl();
+        if (!controlSuccess) {
+          statusText.value = '无法获取音频控制权';
+          return;
+        }
+        
+        // 使用模拟音频流初始化
+        await audioCapture.initWithCustomStream(simulatedMicStream.value, COMPONENT_NAME);
+        audioCapture.startRecording(COMPONENT_NAME); // 用于完整回放
+        
+        await tauriApi.invoke('reset_vad_state').catch(e => console.error('重置VAD状态失败:', e));
+        
+        isVadActive.value = true;
+        statusText.value = '使用模拟麦克风监听中';
+        hasAudioControl.value = true;
+        currentStateMachineState.value = 'Initial';
+        silenceDuration.value = 0;
+        
+        // 启动音频分析
+        await startAudioAnalysisWithCustomStream(simulatedMicStream.value);
+        
+        console.log("[AudioPlayback] 使用模拟麦克风开始识别，VAD已启动");
+      } else {
+        // 使用实际麦克风
+        const controlSuccess = await requestAudioControl();
+        if (!controlSuccess) {
+          statusText.value = '无法获取音频控制权';
+          return;
+        }
+        
+        await audioCapture.init(selectedMicrophoneId.value || undefined, COMPONENT_NAME);
+        audioCapture.startRecording(COMPONENT_NAME); // 用于完整回放
+        
+        await tauriApi.invoke('reset_vad_state').catch(e => console.error('重置VAD状态失败:', e));
+        
+        isVadActive.value = true;
+        statusText.value = '监听中';
+        hasAudioControl.value = true;
+        currentStateMachineState.value = 'Initial';
+        silenceDuration.value = 0;
+        
+        // 启动音频分析
+        await startAudioAnalysis();
+        
+        console.log("[AudioPlayback] 开始识别，VAD已启动");
       }
-      
-      await audioCapture.init(selectedMicrophoneId.value || undefined, COMPONENT_NAME);
-      audioCapture.startRecording(COMPONENT_NAME); // 用于完整回放
-      
-      await tauriApi.invoke('reset_vad_state').catch(e => console.error('重置VAD状态失败:', e));
-      
-      isVadActive.value = true;
-      statusText.value = '监听中';
-      hasAudioControl.value = true;
-      currentStateMachineState.value = 'Initial';
-      silenceDuration.value = 0;
-      
-      // 启动音频分析
-      await startAudioAnalysis();
-      
-      console.log("[AudioPlayback] 开始识别，VAD已启动");
     }
   } catch (error) {
     addErrorLog(`音频捕获错误: ${error}`);
@@ -468,6 +563,21 @@ onMounted(async () => {
   window.addEventListener('audio-playback-ended', backendAudioEndHandler as EventListener);
   window.addEventListener('backend-audio-features', backendAudioFeaturesHandler as EventListener);
   
+  // 尝试从本地存储加载模拟音频
+  try {
+    const loaded = await loadSimulatedAudioFromStorage();
+    hasRecordedAudio.value = loaded;
+    
+    // 检查localStorage中是否存在数据
+    const storedData = localStorage.getItem('simulatedAudioBuffer');
+    hasRecordedAudio.value = !!storedData && loaded;
+    
+    console.log('[AudioPlayback] 模拟音频加载状态:', hasRecordedAudio.value);
+  } catch (error) {
+    console.error('[AudioPlayback] 加载模拟音频失败:', error);
+    hasRecordedAudio.value = false;
+  }
+  
   // 同步全局状态
   hasAudioControl.value = audioCapture?.currentComponent === COMPONENT_NAME;
   await refreshMicrophoneList();
@@ -545,6 +655,433 @@ function stopAudioAnalysis() {
   audioAnalyzer.stopAnalysis();
   audioAnalyzer.cleanup();
   console.log('[AudioPlayback] 停止音频分析');
+}
+
+// --- 模拟麦克风功能 ---
+
+/**
+ * 切换模拟麦克风状态
+ */
+async function toggleSimulatedMic() {
+  try {
+    if (isSimulatedMicActive.value) {
+      // 停用模拟麦克风
+      await stopSimulatedMic();
+      isSimulatedMicActive.value = false;
+      statusText.value = '模拟麦克风已停用';
+      
+      // 如果已经在进行VAD，切换回实际麦克风
+      if (isVadActive.value) {
+        await toggleAudioCapture(true); // 先停止当前
+        await toggleAudioCapture(); // 再用实际麦克风启动
+      }
+    } else {
+      // 启用模拟麦克风
+      if (!hasRecordedAudio.value || !simulatedAudioBuffer.value) {
+        statusText.value = '没有可用的模拟音频，请先录制';
+        return;
+      }
+      
+      const success = await startSimulatedMic();
+      if (success) {
+        isSimulatedMicActive.value = true;
+        statusText.value = '模拟麦克风已启用';
+      } else {
+        statusText.value = '启用模拟麦克风失败';
+      }
+    }
+  } catch (error) {
+    console.error('切换模拟麦克风时出错:', error);
+    statusText.value = '模拟麦克风操作失败';
+  }
+}
+
+/**
+ * 开始录制模拟音频
+ */
+async function startRecordingSimAudio() {
+  try {
+    isRecordingSimAudio.value = true;
+    statusText.value = '正在录制新的模拟音频...';
+    
+    // 请求麦克风权限
+    await requestAudioControl();
+    if (!audioCapture.isInitialized) {
+      await audioCapture.init(selectedMicrophoneId.value || undefined, COMPONENT_NAME);
+    }
+    
+    // 开始录制
+    audioCapture.startRecording(COMPONENT_NAME);
+    
+  } catch (error) {
+    console.error('开始录制模拟音频失败:', error);
+    isRecordingSimAudio.value = false;
+    statusText.value = '录制失败';
+  }
+}
+
+/**
+ * 停止录制模拟音频并保存
+ */
+async function stopRecordingSimAudio() {
+  try {
+    if (!isRecordingSimAudio.value) return;
+    
+    isRecordingSimAudio.value = false;
+    statusText.value = '正在处理录制的音频...';
+    
+    // 停止录制
+    audioCapture.stopRecording(COMPONENT_NAME);
+    
+    // 获取录制的音频数据
+    const audioBlob = await audioCapture.getRecordedAudioBlob();
+    if (!audioBlob) {
+      statusText.value = '没有录制到音频数据';
+      return;
+    }
+    
+    // 转换为AudioBuffer
+    await processRecordedAudioBlob(audioBlob);
+    
+    // 保存到localStorage
+    saveSimulatedAudioToStorage();
+    
+    hasRecordedAudio.value = true;
+    statusText.value = '模拟音频录制完成并保存';
+    
+    // 释放音频控制
+    audioCapture.stop(COMPONENT_NAME);
+    audioCapture.releaseAudioControl(COMPONENT_NAME);
+    
+  } catch (error) {
+    console.error('停止录制模拟音频失败:', error);
+    statusText.value = '保存录制音频失败';
+  }
+}
+
+/**
+ * 处理录制的音频Blob
+ */
+async function processRecordedAudioBlob(blob: Blob): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      // 创建文件读取器
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        if (!e.target?.result) {
+          reject(new Error('读取音频文件失败'));
+          return;
+        }
+        
+        // 创建AudioContext
+        if (!simulatedAudioContext.value) {
+          simulatedAudioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        
+        // 解码音频数据
+        const arrayBuffer = e.target.result as ArrayBuffer;
+        simulatedAudioContext.value.decodeAudioData(
+          arrayBuffer,
+          (buffer) => {
+            simulatedAudioBuffer.value = buffer;
+            hasRecordedAudio.value = true;
+            resolve();
+          },
+          (err) => {
+            console.error('解码音频失败:', err);
+            reject(err);
+          }
+        );
+      };
+      
+      reader.onerror = (err) => {
+        console.error('读取音频文件失败:', err);
+        reject(err);
+      };
+      
+      // 读取Blob为ArrayBuffer
+      reader.readAsArrayBuffer(blob);
+      
+    } catch (error) {
+      console.error('处理录制音频失败:', error);
+      reject(error);
+    }
+  });
+}
+
+/**
+ * 保存模拟音频到本地存储
+ */
+function saveSimulatedAudioToStorage() {
+  try {
+    if (!simulatedAudioBuffer.value) return;
+    
+    // 将AudioBuffer转换为可序列化的格式
+    const buffer = simulatedAudioBuffer.value;
+    const serializedBuffer = {
+      length: buffer.length,
+      sampleRate: buffer.sampleRate,
+      numberOfChannels: buffer.numberOfChannels,
+      // 转换每个通道的数据
+      channels: Array.from({ length: buffer.numberOfChannels }, (_, i) => {
+        const channelData = buffer.getChannelData(i);
+        // 使用Float32Array.from会导致数据过大，这里采样存储
+        // 采样率：如果音频很长，可以调整采样以减小数据量
+        const samplingRate = 4; // 每4个采样点取1个
+        const sampledData = [];
+        for (let j = 0; j < channelData.length; j += samplingRate) {
+          sampledData.push(channelData[j]);
+        }
+        return sampledData;
+      })
+    };
+    
+    // 保存到localStorage
+    localStorage.setItem('simulatedAudioBuffer', JSON.stringify(serializedBuffer));
+    console.log('[AudioPlayback] 模拟音频已保存到本地存储');
+    
+  } catch (error) {
+    console.error('[AudioPlayback] 保存模拟音频到本地存储失败:', error);
+  }
+}
+
+/**
+ * 从本地存储加载模拟音频
+ */
+async function loadSimulatedAudioFromStorage(): Promise<boolean> {
+  try {
+    const storedData = localStorage.getItem('simulatedAudioBuffer');
+    if (!storedData) {
+      console.log('[AudioPlayback] 本地存储中没有模拟音频');
+      return false;
+    }
+    
+    // 解析存储的数据
+    const serializedBuffer = JSON.parse(storedData);
+    
+    // 创建AudioContext (如果还没有)
+    if (!simulatedAudioContext.value) {
+      simulatedAudioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    
+    // 创建新的AudioBuffer
+    const newBuffer = simulatedAudioContext.value.createBuffer(
+      serializedBuffer.numberOfChannels,
+      serializedBuffer.length,
+      serializedBuffer.sampleRate
+    );
+    
+    // 恢复通道数据 (考虑到采样)
+    for (let i = 0; i < serializedBuffer.numberOfChannels; i++) {
+      const channelData = newBuffer.getChannelData(i);
+      const sampledData = serializedBuffer.channels[i];
+      const samplingRate = Math.floor(channelData.length / sampledData.length) || 1;
+      
+      // 使用线性插值恢复采样数据
+      for (let j = 0; j < sampledData.length - 1; j++) {
+        const start = sampledData[j];
+        const end = sampledData[j + 1];
+        
+        for (let k = 0; k < samplingRate; k++) {
+          const index = j * samplingRate + k;
+          if (index < channelData.length) {
+            // 线性插值
+            channelData[index] = start + (end - start) * (k / samplingRate);
+          }
+        }
+      }
+      
+      // 填充最后一段
+      const lastSample = sampledData[sampledData.length - 1];
+      for (let j = (sampledData.length - 1) * samplingRate; j < channelData.length; j++) {
+        channelData[j] = lastSample;
+      }
+    }
+    
+    simulatedAudioBuffer.value = newBuffer;
+    console.log('[AudioPlayback] 已从本地存储加载模拟音频');
+    return true;
+    
+  } catch (error) {
+    console.error('[AudioPlayback] 从本地存储加载模拟音频失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 播放录制的模拟音频 (预览)
+ */
+function playRecordedSimAudio() {
+  try {
+    if (!simulatedAudioBuffer.value || !simulatedAudioContext.value) {
+      statusText.value = '没有可播放的模拟音频';
+      return;
+    }
+    
+    // 如果有正在播放的，先停止
+    if (simulatedAudioSourceNode.value) {
+      try {
+        simulatedAudioSourceNode.value.stop();
+      } catch (e) {}
+      simulatedAudioSourceNode.value = null;
+    }
+    
+    // 创建新的音频源
+    const sourceNode = simulatedAudioContext.value.createBufferSource();
+    sourceNode.buffer = simulatedAudioBuffer.value;
+    sourceNode.connect(simulatedAudioContext.value.destination);
+    sourceNode.onended = () => {
+      statusText.value = '模拟音频播放完成';
+    };
+    
+    // 播放
+    sourceNode.start();
+    simulatedAudioSourceNode.value = sourceNode;
+    statusText.value = '正在播放模拟音频...';
+    
+  } catch (error) {
+    console.error('播放模拟音频失败:', error);
+    statusText.value = '播放失败';
+  }
+}
+
+/**
+ * 删除录制的模拟音频
+ */
+function deleteRecordedSimAudio() {
+  try {
+    // 停止任何正在播放的内容
+    if (simulatedAudioSourceNode.value) {
+      try {
+        simulatedAudioSourceNode.value.stop();
+      } catch (e) {}
+      simulatedAudioSourceNode.value = null;
+    }
+    
+    // 清理资源
+    simulatedAudioBuffer.value = null;
+    localStorage.removeItem('simulatedAudioBuffer');
+    
+    // 更新状态
+    isRecordingSimAudio.value = false;
+    hasRecordedAudio.value = false;
+    statusText.value = '模拟音频已删除';
+    
+  } catch (error) {
+    console.error('删除模拟音频失败:', error);
+  }
+}
+
+/**
+ * 启动模拟麦克风
+ */
+async function startSimulatedMic(): Promise<boolean> {
+  try {
+    if (!simulatedAudioBuffer.value || !hasRecordedAudio.value) {
+      console.warn('没有可用的模拟音频');
+      return false;
+    }
+    
+    // 确保AudioContext存在并且是活动的
+    if (!simulatedAudioContext.value) {
+      simulatedAudioContext.value = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } else if (simulatedAudioContext.value.state === 'suspended') {
+      await simulatedAudioContext.value.resume();
+    }
+    
+    // 创建一个MediaStreamAudioDestinationNode作为输出
+    simulatedAudioDestination.value = simulatedAudioContext.value.createMediaStreamDestination();
+    
+    // 更新模拟麦克风流
+    simulatedMicStream.value = simulatedAudioDestination.value.stream;
+    
+    // 设置循环播放
+    setupLoopedPlayback();
+    
+    return true;
+  } catch (error) {
+    console.error('启动模拟麦克风失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 设置循环播放模拟音频
+ */
+function setupLoopedPlayback() {
+  try {
+    if (!simulatedAudioContext.value || !simulatedAudioBuffer.value || !simulatedAudioDestination.value) {
+      return;
+    }
+    
+    // 如果有正在播放的，先停止
+    if (simulatedAudioSourceNode.value) {
+      try {
+        simulatedAudioSourceNode.value.stop();
+      } catch (e) {}
+    }
+    
+    // 创建新的音频源
+    const sourceNode = simulatedAudioContext.value.createBufferSource();
+    sourceNode.buffer = simulatedAudioBuffer.value;
+    
+    // 设置循环播放
+    sourceNode.loop = true;
+    
+    // 连接到目标节点
+    sourceNode.connect(simulatedAudioDestination.value);
+    
+    // 开始播放
+    sourceNode.start();
+    simulatedAudioSourceNode.value = sourceNode;
+    
+    console.log('模拟麦克风音频循环播放已设置');
+  } catch (error) {
+    console.error('设置循环播放失败:', error);
+  }
+}
+
+/**
+ * 停止模拟麦克风
+ */
+async function stopSimulatedMic() {
+  try {
+    // 停止音频源播放
+    if (simulatedAudioSourceNode.value) {
+      try {
+        simulatedAudioSourceNode.value.stop();
+      } catch (e) {}
+      simulatedAudioSourceNode.value = null;
+    }
+    
+    // 断开连接并清理
+    simulatedAudioNode.value = null;
+    simulatedAudioDestination.value = null;
+    simulatedMicStream.value = null;
+    
+    // 挂起AudioContext以节省资源
+    if (simulatedAudioContext.value && simulatedAudioContext.value.state === 'running') {
+      await simulatedAudioContext.value.suspend();
+    }
+    
+    console.log('模拟麦克风已停止');
+  } catch (error) {
+    console.error('停止模拟麦克风失败:', error);
+  }
+}
+
+// --- 重写开始/停止VAD音频捕获，支持模拟麦克风 ---
+
+// 为自定义音频流启动音频分析
+async function startAudioAnalysisWithCustomStream(stream: MediaStream) {
+  try {
+    await audioAnalyzer.initForMicrophone(stream);
+    audioAnalyzer.startAnalysis(handleAudioFeatures);
+    console.log('[AudioPlayback] 开始模拟麦克风音频分析');
+  } catch (error) {
+    console.error('启动模拟麦克风音频分析失败:', error);
+  }
 }
 </script>
 
@@ -733,4 +1270,76 @@ button:disabled {
   100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
 }
 
+.simulated-mic-controls {
+  width: 100%;
+  margin: 10px 0;
+  padding: 15px;
+  background-color: #f0f0f0;
+  border-radius: 8px;
+}
+
+.sim-mic-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.sim-mic-status {
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.sim-mic-status.active {
+  background-color: #e8f5e9;
+  color: #388e3c;
+}
+
+.sim-mic-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 500px) {
+  .sim-mic-actions {
+    flex-direction: column;
+  }
+}
+
+.sim-mic-actions button {
+  padding: 8px 15px;
+  border: none;
+  border-radius: 5px;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.sim-mic-actions button:hover:not(:disabled) {
+  background-color: #0b7dda;
+}
+
+.sim-mic-actions button.active {
+  background-color: #f44336;
+}
+
+.sim-mic-actions button.active:hover {
+  background-color: #d32f2f;
+}
+
+.sim-mic-actions button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.sim-mic-actions button.recording {
+  background-color: #ff9800;
+}
+
+.sim-mic-actions button.recording:hover {
+  background-color: #f57c00;
+}
 </style> 
