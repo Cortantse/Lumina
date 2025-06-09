@@ -24,7 +24,7 @@ async def simple_send_request_to_llm(text: str):
     简单发送请求到LLM
     """
     messages = [
-        {"role": "system", "content": "你是一个语音智能助手，请根据用户的问题给出简洁、快速但有情感的回答。"},
+        {"role": "system", "content": "你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，请根据用户的问题给出简洁、快速但有情感的回答，注意回复转语音的内容。"},
     ]
     _previous_messages.append({"role": "user", "content": text})
     messages.extend(_previous_messages)

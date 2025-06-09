@@ -33,6 +33,23 @@
       </div>
     </div>
 
+    <!-- SiriWave状态和音频音量显示 -->
+    <div class="audio-status-panel">
+      <div class="status-item">
+        <span class="status-label">SiriWave状态:</span>
+        <span class="status-value" :class="`siri-${siriWaveMode}`">
+          {{ siriWaveMode }}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">音频音量:</span>
+        <div class="volume-meter">
+          <div class="volume-bar" :style="{width: `${currentAudioVolume * 100}%`}"></div>
+          <span class="volume-text">{{ (currentAudioVolume * 100).toFixed(1) }}%</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 控制按钮 -->
     <div class="controls">
       <button @click="() => toggleAudioCapture()" :class="{ active: isVadActive }">
@@ -196,8 +213,9 @@ const silenceDuration = ref(0);
 
 // --- SiriWave 相关状态 ---
 const siriWaveMode = ref<'idle' | 'listening' | 'speaking'>('idle');
-const currentListeningIntensity = ref(0.5); // 监听模式的动态强度
-const currentSpeakingIntensity = ref(0.75); // 说话模式的动态强度
+const currentListeningIntensity = ref(0.3); // 麦克风输入强度
+const currentSpeakingIntensity = ref(0.5);  // 音频播放强度
+const currentAudioVolume = ref(0); // 当前音频音量，用于显示
 const isPlayingBackendAudio = ref(false); // 是否正在播放后端音频
 
 // --- 识别与结果 ---
@@ -343,9 +361,13 @@ const backendAudioEndHandler = (_event: CustomEvent) => {
 const backendAudioFeaturesHandler = (event: CustomEvent) => {
   const features = event.detail as AudioFeatures;
   
-  // 当播放后端音频时，更新 speaking 模式的强度
-  if (siriWaveMode.value === 'speaking' && isPlayingBackendAudio.value) {
-    currentSpeakingIntensity.value = 0.5 + features.volume * 0.5; // 0.5-1.0 范围
+  // 仅在speaking模式下处理音频特征
+  if (siriWaveMode.value === 'speaking') {
+    console.log(`[AudioPlayback] 收到后端音频特征: 音量=${features.volume.toFixed(3)}, 是否静音=${features.isSilent}`);
+    
+    // 使用与全局处理一致的公式
+    currentSpeakingIntensity.value = 0.2 + features.volume * 1.3;
+    currentAudioVolume.value = features.volume; // 更新当前音量显示
   }
 };
 
@@ -607,17 +629,17 @@ onUnmounted(() => {
 
 // --- 状态映射逻辑 ---
 // 监听状态机状态变化，更新 SiriWave 模式
-watch([currentStateMachineState, isPlayingBackendAudio], ([state, playingAudio]) => {
-  if (playingAudio) {
-    siriWaveMode.value = 'speaking';
-  } else if (state === 'Initial') {
+watch(currentStateMachineState, (state) => {
+  // 根据 `前后端状态转移.markdown` 的第三点规则进行映射
+  //   idle = 初始
+  //   listening = 说话中/等待中
+  //   speaking = 听音中
+  if (state === 'Initial') {
     siriWaveMode.value = 'idle';
-  } else if (state === 'Speaking') {
+  } else if (state === 'Speaking' || state === 'Waiting') {
     siriWaveMode.value = 'listening';
   } else if (state === 'Listening') {
     siriWaveMode.value = 'speaking';
-  } else if (state === 'Waiting') {
-    siriWaveMode.value = 'listening';
   }
 });
 
@@ -625,14 +647,30 @@ watch([currentStateMachineState, isPlayingBackendAudio], ([state, playingAudio])
 // let audioAnalysisInterval: ReturnType<typeof setInterval> | null = null;
 
 // 处理音频特征更新
-function handleAudioFeatures(features: AudioFeatures) {
+function handleAudioFeatures(features: AudioFeatures, isFromBackend: boolean = false) {
+  // 添加诊断日志
+  if (features.volume > 0.01) {
+    console.log(
+      `[AudioPlayback] ${isFromBackend ? '后端' : '麦克风'}音频特征: ` +
+      `模式=${siriWaveMode.value}, 音量=${features.volume.toFixed(3)}, ` +
+      `静音=${features.isSilent}, 后端播放=${isPlayingBackendAudio.value}`
+    );
+  }
+
   // 根据当前模式更新强度
   if (siriWaveMode.value === 'listening') {
     // 监听模式：基于麦克风音量调整强度
-    currentListeningIntensity.value = 0.3 + features.volume * 0.7; // 0.3-1.0 范围
+    // 将音量的动态范围映射到更大的强度变化范围
+    currentListeningIntensity.value = 0.1 + features.volume * 1.5;
+    currentAudioVolume.value = features.volume; // 更新当前音量
   } else if (siriWaveMode.value === 'speaking') {
     // 说话模式：基于播放音频音量调整强度
-    currentSpeakingIntensity.value = 0.5 + features.volume * 0.5; // 0.5-1.0 范围
+    // 同样，为说话模式提供更大的动态范围
+    // 如果是来自后端的特征，确保它能反映在UI上
+    if (isFromBackend || isPlayingBackendAudio.value) {
+      currentSpeakingIntensity.value = 0.2 + features.volume * 1.3;
+      currentAudioVolume.value = features.volume; // 更新当前音量
+    }
   }
 }
 
@@ -1341,5 +1379,64 @@ button:disabled {
 
 .sim-mic-actions button.recording:hover {
   background-color: #f57c00;
+}
+
+.audio-status-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.status-label {
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.status-value {
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.volume-meter {
+  width: 100px;
+  height: 10px;
+  background-color: #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.volume-bar {
+  height: 100%;
+  background-color: #4caf50;
+}
+
+.volume-text {
+  font-size: 12px;
+  color: #666;
+}
+
+.siri-idle {
+  background-color: #607d8b;
+  color: white;
+}
+
+.siri-listening {
+  background-color: #2196f3;
+  color: white;
+}
+
+.siri-speaking {
+  background-color: #4caf50;
+  color: white;
 }
 </style> 
