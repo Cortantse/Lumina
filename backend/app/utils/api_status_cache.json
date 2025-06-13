@@ -1,9 +1,9 @@
 {
-  "timestamp": "2025-06-08T22:39:10.542150",
+  "timestamp": "2025-06-13T12:38:42.912167",
   "api_status": {
     "ali_api2_plus": {
       "available": false,
-      "last_check": 1749393549.1849039,
+      "last_check": 1749789522.164894,
       "details": {
         "name": "ali_api2_plus",
         "available": false,
@@ -16,13 +16,32 @@
             "param": null,
             "code": "model_not_found"
           },
-          "request_id": "225106af-6ce3-95bb-afff-38e5450ef7cd"
+          "request_id": "bb0bd6b1-db6d-9e75-a056-2a4d0d3da1d2"
+        }
+      }
+    },
+    "ali_api1_plus": {
+      "available": false,
+      "last_check": 1749789522.165895,
+      "details": {
+        "name": "ali_api1_plus",
+        "available": false,
+        "status_code": 404,
+        "error": "API响应状态码: 404",
+        "response": {
+          "error": {
+            "message": "The model `qwen-plus-0305` does not exist or you do not have access to it.",
+            "type": "invalid_request_error",
+            "param": null,
+            "code": "model_not_found"
+          },
+          "request_id": "040dd448-5fcd-938c-9829-d022294dc45d"
         }
       }
     },
     "ali_api_plus": {
       "available": false,
-      "last_check": 1749393549.1852531,
+      "last_check": 1749789522.198623,
       "details": {
         "name": "ali_api_plus",
         "available": false,
@@ -35,13 +54,13 @@
             "param": null,
             "code": "model_not_found"
           },
-          "request_id": "8540f89c-b4de-9323-bc46-7f980826a178"
+          "request_id": "6d31b598-9bd0-9aae-9b5c-ff80e64a853c"
         }
       }
     },
     "ali_api1_turbo": {
       "available": true,
-      "last_check": 1749393549.585509,
+      "last_check": 1749789522.5083547,
       "details": {
         "name": "ali_api1_turbo",
         "available": true,
@@ -65,51 +84,17 @@
             "completion_tokens": 1,
             "total_tokens": 19
           },
-          "created": 1749393550,
+          "created": 1749789523,
           "system_fingerprint": null,
           "model": "qwen-turbo-2025-02-11",
-          "id": "chatcmpl-55c7f014-641a-9b34-97c3-c53d530822cd"
+          "id": "chatcmpl-4b31f458-d4bd-9672-80a5-931cd99426ec"
         },
-        "elapsed": 0.84
-      }
-    },
-    "ali_api2_turbo-new": {
-      "available": true,
-      "last_check": 1749393549.6303182,
-      "details": {
-        "name": "ali_api2_turbo-new",
-        "available": true,
-        "status_code": 200,
-        "error": null,
-        "response": {
-          "choices": [
-            {
-              "message": {
-                "role": "assistant",
-                "content": "2"
-              },
-              "finish_reason": "stop",
-              "index": 0,
-              "logprobs": null
-            }
-          ],
-          "object": "chat.completion",
-          "usage": {
-            "prompt_tokens": 22,
-            "completion_tokens": 1,
-            "total_tokens": 23
-          },
-          "created": 1749393550,
-          "system_fingerprint": null,
-          "model": "qwen-turbo-latest",
-          "id": "chatcmpl-9930ae48-5185-9f2d-afdb-f3b8a7b92caa"
-        },
-        "elapsed": 0.88
+        "elapsed": 0.68
       }
     },
     "ali_api1_turbo-new": {
       "available": true,
-      "last_check": 1749393549.651764,
+      "last_check": 1749789522.5421429,
       "details": {
         "name": "ali_api1_turbo-new",
         "available": true,
@@ -133,121 +118,19 @@
             "completion_tokens": 1,
             "total_tokens": 23
           },
-          "created": 1749393550,
+          "created": 1749789523,
           "system_fingerprint": null,
           "model": "qwen-turbo-latest",
-          "id": "chatcmpl-004b755d-2896-921b-9fc1-74800cb9ed66"
+          "id": "chatcmpl-00f1941b-8530-9b4c-9e2a-87e4b4dc5f37"
         },
-        "elapsed": 0.91
+        "elapsed": 0.71
       }
     },
-    "ali_api1_max": {
+    "ali_api2_turbo-new": {
       "available": true,
-      "last_check": 1749393549.840466,
+      "last_check": 1749789522.5448864,
       "details": {
-        "name": "ali_api1_max",
-        "available": true,
-        "status_code": 200,
-        "error": null,
-        "response": {
-          "choices": [
-            {
-              "message": {
-                "role": "assistant",
-                "content": "```2```"
-              },
-              "finish_reason": "stop",
-              "index": 0,
-              "logprobs": null
-            }
-          ],
-          "object": "chat.completion",
-          "usage": {
-            "prompt_tokens": 18,
-            "completion_tokens": 3,
-            "total_tokens": 21
-          },
-          "created": 1749393550,
-          "system_fingerprint": null,
-          "model": "qwen-max-2025-01-25",
-          "id": "chatcmpl-5c51d889-6b3b-914f-977f-38119f94fd05"
-        },
-        "elapsed": 1.1
-      }
-    },
-    "ali_api_max": {
-      "available": true,
-      "last_check": 1749393549.842272,
-      "details": {
-        "name": "ali_api_max",
-        "available": true,
-        "status_code": 200,
-        "error": null,
-        "response": {
-          "choices": [
-            {
-              "message": {
-                "role": "assistant",
-                "content": "```2```"
-              },
-              "finish_reason": "stop",
-              "index": 0,
-              "logprobs": null
-            }
-          ],
-          "object": "chat.completion",
-          "usage": {
-            "prompt_tokens": 18,
-            "completion_tokens": 3,
-            "total_tokens": 21
-          },
-          "created": 1749393550,
-          "system_fingerprint": null,
-          "model": "qwen-max-2025-01-25",
-          "id": "chatcmpl-4df5dd0f-ca35-990d-bf78-37e3a314e510"
-        },
-        "elapsed": 1.09
-      }
-    },
-    "ali_api2_max": {
-      "available": true,
-      "last_check": 1749393549.9914382,
-      "details": {
-        "name": "ali_api2_max",
-        "available": true,
-        "status_code": 200,
-        "error": null,
-        "response": {
-          "choices": [
-            {
-              "message": {
-                "role": "assistant",
-                "content": "2"
-              },
-              "finish_reason": "stop",
-              "index": 0,
-              "logprobs": null
-            }
-          ],
-          "object": "chat.completion",
-          "usage": {
-            "prompt_tokens": 18,
-            "completion_tokens": 1,
-            "total_tokens": 19
-          },
-          "created": 1749393550,
-          "system_fingerprint": null,
-          "model": "qwen-max-2025-01-25",
-          "id": "chatcmpl-b00e9494-d330-9f42-8f29-ee84e6906f80"
-        },
-        "elapsed": 1.25
-      }
-    },
-    "ali_api_turbo-new": {
-      "available": true,
-      "last_check": 1749393550.0277278,
-      "details": {
-        "name": "ali_api_turbo-new",
+        "name": "ali_api2_turbo-new",
         "available": true,
         "status_code": 200,
         "error": null,
@@ -269,70 +152,17 @@
             "completion_tokens": 1,
             "total_tokens": 23
           },
-          "created": 1749393550,
+          "created": 1749789523,
           "system_fingerprint": null,
           "model": "qwen-turbo-latest",
-          "id": "chatcmpl-9030d341-ab1b-9da3-8c3e-88fb36404692"
+          "id": "chatcmpl-38b06459-293a-9d2d-8462-e708c028cc2e"
         },
-        "elapsed": 0.84
-      }
-    },
-    "ali_api_turbo": {
-      "available": true,
-      "last_check": 1749393550.0818071,
-      "details": {
-        "name": "ali_api_turbo",
-        "available": true,
-        "status_code": 200,
-        "error": null,
-        "response": {
-          "choices": [
-            {
-              "message": {
-                "role": "assistant",
-                "content": "2"
-              },
-              "finish_reason": "stop",
-              "index": 0,
-              "logprobs": null
-            }
-          ],
-          "object": "chat.completion",
-          "usage": {
-            "prompt_tokens": 18,
-            "completion_tokens": 1,
-            "total_tokens": 19
-          },
-          "created": 1749393550,
-          "system_fingerprint": null,
-          "model": "qwen-turbo-2025-02-11",
-          "id": "chatcmpl-abf61b74-8290-90f2-82c2-17476df78fd3"
-        },
-        "elapsed": 0.9
-      }
-    },
-    "ali_api1_plus": {
-      "available": false,
-      "last_check": 1749393550.185877,
-      "details": {
-        "name": "ali_api1_plus",
-        "available": false,
-        "status_code": 404,
-        "error": "API响应状态码: 404",
-        "response": {
-          "error": {
-            "message": "The model `qwen-plus-0305` does not exist or you do not have access to it.",
-            "type": "invalid_request_error",
-            "param": null,
-            "code": "model_not_found"
-          },
-          "request_id": "d22ea7bb-93a8-9cd2-b25b-3297cdea3552"
-        }
+        "elapsed": 0.71
       }
     },
     "ali_api2_turbo": {
       "available": true,
-      "last_check": 1749393550.541685,
+      "last_check": 1749789522.598355,
       "details": {
         "name": "ali_api2_turbo",
         "available": true,
@@ -356,24 +186,194 @@
             "completion_tokens": 1,
             "total_tokens": 19
           },
-          "created": 1749393551,
+          "created": 1749789523,
           "system_fingerprint": null,
           "model": "qwen-turbo-2025-02-11",
-          "id": "chatcmpl-37799617-0b76-9cb5-8d29-a86ef1bb9beb"
+          "id": "chatcmpl-c9314ad2-d713-9b43-9071-bd3adda06d1b"
         },
-        "elapsed": 1.8
+        "elapsed": 0.77
+      }
+    },
+    "ali_api_turbo-new": {
+      "available": true,
+      "last_check": 1749789522.6984417,
+      "details": {
+        "name": "ali_api_turbo-new",
+        "available": true,
+        "status_code": 200,
+        "error": null,
+        "response": {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "2"
+              },
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null
+            }
+          ],
+          "object": "chat.completion",
+          "usage": {
+            "prompt_tokens": 22,
+            "completion_tokens": 1,
+            "total_tokens": 23
+          },
+          "created": 1749789523,
+          "system_fingerprint": null,
+          "model": "qwen-turbo-latest",
+          "id": "chatcmpl-962a887a-d227-9fdd-be11-7b65a4ed8ad9"
+        },
+        "elapsed": 0.53
+      }
+    },
+    "ali_api_turbo": {
+      "available": true,
+      "last_check": 1749789522.7500455,
+      "details": {
+        "name": "ali_api_turbo",
+        "available": true,
+        "status_code": 200,
+        "error": null,
+        "response": {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "2"
+              },
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null
+            }
+          ],
+          "object": "chat.completion",
+          "usage": {
+            "prompt_tokens": 18,
+            "completion_tokens": 1,
+            "total_tokens": 19
+          },
+          "created": 1749789523,
+          "system_fingerprint": null,
+          "model": "qwen-turbo-2025-02-11",
+          "id": "chatcmpl-50ceee51-29e9-9af2-a68e-cdba6b6f8233"
+        },
+        "elapsed": 0.58
+      }
+    },
+    "ali_api2_max": {
+      "available": true,
+      "last_check": 1749789522.757237,
+      "details": {
+        "name": "ali_api2_max",
+        "available": true,
+        "status_code": 200,
+        "error": null,
+        "response": {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "```2```"
+              },
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null
+            }
+          ],
+          "object": "chat.completion",
+          "usage": {
+            "prompt_tokens": 18,
+            "completion_tokens": 3,
+            "total_tokens": 21
+          },
+          "created": 1749789523,
+          "system_fingerprint": null,
+          "model": "qwen-max-2025-01-25",
+          "id": "chatcmpl-48023017-5377-9419-a811-c937c365000e"
+        },
+        "elapsed": 0.93
+      }
+    },
+    "ali_api1_max": {
+      "available": true,
+      "last_check": 1749789522.8447018,
+      "details": {
+        "name": "ali_api1_max",
+        "available": true,
+        "status_code": 200,
+        "error": null,
+        "response": {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "```2```"
+              },
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null
+            }
+          ],
+          "object": "chat.completion",
+          "usage": {
+            "prompt_tokens": 18,
+            "completion_tokens": 3,
+            "total_tokens": 21
+          },
+          "created": 1749789524,
+          "system_fingerprint": null,
+          "model": "qwen-max-2025-01-25",
+          "id": "chatcmpl-ac9dcc0d-6c89-913b-8d33-710ab84b24f9"
+        },
+        "elapsed": 1.02
+      }
+    },
+    "ali_api_max": {
+      "available": true,
+      "last_check": 1749789522.9121673,
+      "details": {
+        "name": "ali_api_max",
+        "available": true,
+        "status_code": 200,
+        "error": null,
+        "response": {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "2"
+              },
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null
+            }
+          ],
+          "object": "chat.completion",
+          "usage": {
+            "prompt_tokens": 18,
+            "completion_tokens": 1,
+            "total_tokens": 19
+          },
+          "created": 1749789524,
+          "system_fingerprint": null,
+          "model": "qwen-max-2025-01-25",
+          "id": "chatcmpl-aaf65f16-466f-99c5-b76a-85c8ed27fcd6"
+        },
+        "elapsed": 1.08
       }
     }
   },
   "available_apis": [
     "ali_api1_turbo",
-    "ali_api2_turbo-new",
     "ali_api1_turbo-new",
-    "ali_api1_max",
-    "ali_api_max",
-    "ali_api2_max",
+    "ali_api2_turbo-new",
+    "ali_api2_turbo",
     "ali_api_turbo-new",
     "ali_api_turbo",
-    "ali_api2_turbo"
+    "ali_api2_max",
+    "ali_api1_max",
+    "ali_api_max"
   ]
 }
