@@ -2,11 +2,11 @@
 
 from typing import Optional, Any, List, Callable, Dict
 import asyncio
-import pyaudio
 
 from app.protocols.stt import AudioData, STTResponse, STTClient
 from app.protocols.stt import create_alicloud_stt_client
 from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion
+from app.tts.send_tts import send_tts_audio_stream
 
 
 class PipelineService:
@@ -42,7 +42,7 @@ class PipelineService:
         # TTS播放控制
         self.tts_playing = False
         self.tts_monitor_task = None
-        self.check_interval = 1.0  # 检查STT缓冲区的间隔时间（秒）
+        self.check_interval = 0.01  # 检查STT缓冲区的间隔时间（秒） # TODO 轮询慢且卡
         
         # print("【调试】PipelineService初始化完成")
         
@@ -205,14 +205,16 @@ class PipelineService:
                         cleared_count = await self.stt_client.clear_sentence_buffer()
                         # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
 
-                                                # 播放TTS
+                        # 播放TTS
                         self.tts_playing = True
 
                         from app.llm.qwen_client import simple_send_request_to_llm
 
                         text = await simple_send_request_to_llm(text)
 
-                        await self._play_tts(text)
+                        # 获取音频流并发送到前端
+                        audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
+                        await send_tts_audio_stream(audio_stream)
                         
                         self.tts_playing = False
                 
@@ -225,45 +227,6 @@ class PipelineService:
             except Exception as e:
                 print(f"【错误】监控STT缓冲区时出错: {e}")
                 await asyncio.sleep(self.check_interval)  # 发生错误时也等待下一个间隔
-    
-    async def _play_tts(self, text: str) -> None:
-        """播放TTS音频
-        
-        将文本通过TTS转换为语音并播放
-        
-        Args:
-            text: 要转换为语音的文本
-        """
-        # print(f"【调试】开始TTS转换并播放: '{text}'")
-        
-        try:
-            # 创建PyAudio播放流
-            p = pyaudio.PyAudio()
-            stream = p.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=32000,
-                output=True
-            )
-            
-            # 异步迭代TTS结果并播放
-            async for resp in self.tts_client.send_tts_request(self.tts_emotion, text):
-                if not self.running:
-                    # print("【调试】Pipeline服务已停止，中断TTS播放")
-                    break
-                    
-                stream.write(resp.audio_chunk)
-            
-            # 关闭播放流
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
-            
-            # print(f"【调试】TTS播放完成: '{text}'")
-            
-        except Exception as e:
-            print(f"【错误】播放TTS音频时出错: {e}")
-            self.tts_playing = False
     
     async def _run_callback(self, callback: Callable, text: str, is_final: bool) -> None:
         """运行回调函数

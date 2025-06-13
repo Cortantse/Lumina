@@ -4,7 +4,6 @@ import asyncio
 import websockets
 import json
 import ssl
-import pyaudio
 
 from typing import Protocol, AsyncIterator
 from enum import Enum
@@ -68,7 +67,6 @@ class MiniMaxTTSClient(TTSClient):
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
-        self._py_audio = pyaudio.PyAudio()
 
     async def _establish_connection(self) -> websockets.WebSocketClientProtocol | None:
         """

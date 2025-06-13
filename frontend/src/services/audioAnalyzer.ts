@@ -38,7 +38,7 @@ class AudioAnalyzerService {
       // 创建分析器节点
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 2048; // 设置FFT大小
-      this.analyserNode.smoothingTimeConstant = 0.8; // 平滑系数
+      this.analyserNode.smoothingTimeConstant = 0.5; // 平滑系数
       
       // 创建源节点
       this.sourceNode = this.audioContext.createMediaStreamSource(stream);
