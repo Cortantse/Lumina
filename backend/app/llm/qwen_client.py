@@ -1,4 +1,5 @@
 # app/llm/qwen_client.py 千问大模型客户端
+from typing import Optional
 from app.utils.request import send_request_async
 
 """
@@ -24,11 +25,53 @@ async def simple_send_request_to_llm(text: str):
     简单发送请求到LLM
     """
     messages = [
-        {"role": "system", "content": "你是一个语音智能助手，请根据用户的问题给出简洁、快速但有情感的回答。"},
+        {"role": "system", "content": "你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，请根据用户的问题给出简洁、快速但有情感的回答，注意回复能被转语音的内容，表情什么的不能。"},
     ]
     _previous_messages.append({"role": "user", "content": text})
     messages.extend(_previous_messages)
 
     response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
     _previous_messages.append({"role": "assistant", "content": response})
+
+    print(f"【调试】[QwenClient] 收到LLM响应: {response}")
+
     return response
+
+
+async def simple_semantic_turn_detection(text: str) -> Optional[bool]:
+    """
+    简单语义判断是否用户说完话了
+    """
+    messages = [
+        {"role": "system", "content": "你是一个语义完整性判断语音助手，你会通过用户的历史对话和你的记忆，判断用户此时是否说完话了，返回值只能为**一个字符** Y 或 N，表示用户是否说完话了。你会首先获得用户历史的历史和当轮你需要判断的文本，然后判断用户是否说完话了。"},
+    ]
+
+    # 给于最近两条用户的说话文本
+    # 倒序遍历 _previous_messages 找到最近两条用户的说话文本
+    for i in range(len(_previous_messages) - 1, -1, -1):
+        if _previous_messages[i]["role"] == "user":
+            user_text = _previous_messages[i]["content"]
+            if len(messages) <= 5: # 一条 sys 两条 user 两条 assistant
+                messages.append({"role": "user", "content": user_text})
+                messages.append({"role": "assistant", "content": 'Y'})
+            else:
+                break
+    
+    # 加入当前轮次的用户文本
+    messages.append({"role": "user", "content": text})
+
+    response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
+
+    # 解析
+    result = None
+    if response == 'Y':
+        result = True
+    elif response == 'N':
+        result = False
+    else:
+        print(f"【调试】[QwenClient] 语义判断失败，回复: '{response}'，不属于任何一个值")
+        result = None
+
+    return result
+
+    

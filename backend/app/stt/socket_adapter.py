@@ -249,7 +249,7 @@ class SocketSTTHandler:
                     # 读取4字节的长度头
                     length_bytes = await loop.sock_recv(client, 4)
                     if not length_bytes or len(length_bytes) < 4:
-                        print(f"【调试】客户端 {client_id} 连接已关闭或读取长度失败")
+                        # print(f"【调试】客户端 {client_id} 连接已关闭或读取长度失败")
                         return
                     
                     # 解析长度字段
@@ -270,7 +270,7 @@ class SocketSTTHandler:
                     audio_data = await loop.sock_recv(client, audio_length * 2)
                     
                     if not audio_data:
-                        print(f"【调试】客户端 {client_id} 连接已断开")
+                        # print(f"【调试】客户端 {client_id} 连接已断开")
                         return
                     
                     # 检查是否接收到完整数据
@@ -326,7 +326,7 @@ class SocketSTTHandler:
                 client.close()
             except Exception as e:
                 print(f"【错误】关闭客户端连接时出错: {e}")
-            print(f"【调试】客户端 {client_id} 连接已关闭")
+            # print(f"【调试】客户端 {client_id} 连接已关闭")
     
     async def _create_result_socket(self) -> None:
         """创建发送识别结果的Socket（根据平台不同使用Unix Socket或TCP Socket）"""
@@ -473,8 +473,8 @@ class SocketSTTHandler:
                 "is_final": response.is_final
             }).encode('utf-8')
             
-            # 发送识别结果
-            await loop.sock_sendall(self.result_client, result_json)
+            # 发送识别结果 (添加换行符以便Rust客户端解析)
+            await loop.sock_sendall(self.result_client, result_json + b'\n')
             
             # print(f"【调试】已发送识别结果: '{response.text}' (是否最终结果: {response.is_final})")
         except Exception as e:

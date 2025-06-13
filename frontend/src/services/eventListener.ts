@@ -90,6 +90,10 @@ class EventListenerService {
             bytes[i] = binaryString.charCodeAt(i);
           }
           
+          // 先发出播放开始事件
+          window.dispatchEvent(new CustomEvent('audio-playback-started'));
+          console.log('[eventListener] 已发送audio-playback-started事件');
+          
           // 播放音频
           await backendAudioPlayer.playAudio(bytes.buffer);
         } catch (error) {
@@ -100,6 +104,11 @@ class EventListenerService {
       // 保存清理函数
       this.cleanupFunctions.push(vadCleanup, sttCleanup, silenceCleanup, stateChangeCleanup, audioDataCleanup);
       
+      // 启动后端的监听器
+      await tauriApi.invoke('start_stt_result_listener');
+      await tauriApi.invoke('start_tts_audio_listener');
+      logDebug('已启动后端的STT结果和TTS音频监听器');
+
       logDebug('事件监听器初始化成功');
       this.isInitialized = true;
     } catch (error) {
