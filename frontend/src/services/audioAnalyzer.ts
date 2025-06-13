@@ -38,7 +38,7 @@ class AudioAnalyzerService {
       // 创建分析器节点
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 2048; // 设置FFT大小
-      this.analyserNode.smoothingTimeConstant = 0.8; // 平滑系数
+      this.analyserNode.smoothingTimeConstant = 0.5; // 平滑系数
       
       // 创建源节点
       this.sourceNode = this.audioContext.createMediaStreamSource(stream);
@@ -76,9 +76,9 @@ class AudioAnalyzerService {
       // 创建源节点
       this.playbackSourceNode = this.audioContext.createMediaElementSource(audioElement);
       
-      // 连接节点
+      // 连接节点: source -> analyser -> destination
       this.playbackSourceNode.connect(this.analyserNode);
-      this.playbackSourceNode.connect(this.audioContext.destination); // 连接到输出以播放音频
+      this.analyserNode.connect(this.audioContext.destination); // 连接到输出以播放音频
       
       // 初始化数据数组
       const bufferLength = this.analyserNode.frequencyBinCount;

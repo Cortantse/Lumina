@@ -1,0 +1,168 @@
+@startuml Lumina Pipeline Detailed Sequence
+
+!theme materia
+
+title Lumina Real-time Dialogue Pipeline: Detailed Sequence
+
+actor User
+
+box "Frontend (Vue + Tauri)" #LightBlue
+    participant "App.vue" as FE_App
+    participant "audioCapture.ts" as FE_AudioCapture
+    participant "backendAudioPlayer.ts" as FE_AudioPlayer
+end box
+
+box "Backend (FastAPI)" #LightGreen
+    participant "/ws/audio" as BE_AudioWS
+    participant "/ws/control" as BE_ControlWS
+    participant "PipelineService" as BE_Pipeline
+    participant "AliCloudSTTAdapter" as BE_STT
+    participant "QwenClient" as BE_LLM
+    participant "MiniMaxTTSClient" as BE_TTS
+    participant "send_tts.py" as BE_TTSSender
+end box
+
+box "External Services" #Orange
+    participant "AliCloud" as Ext_AliCloud
+    participant "Qwen LLM" as Ext_Qwen
+    participant "MiniMax" as Ext_MiniMax
+end box
+
+autonumber
+
+User -> FE_App: Clicks "Start" button
+activate FE_App
+
+FE_App -> FE_AudioCapture: startRecording()
+activate FE_AudioCapture
+
+FE_AudioCapture -> FE_AudioCapture: initMicAndVAD()
+FE_AudioCapture -> BE_AudioWS: Establishes WebSocket Connection
+
+activate BE_AudioWS
+BE_AudioWS -> BE_Pipeline: initialize(service)
+BE_AudioWS -> BE_Pipeline: start_stt_session()
+activate BE_Pipeline
+
+BE_Pipeline -> BE_STT: start_session()
+activate BE_STT
+note right of BE_STT: Creates NlsSpeechTranscriber,\nstarts it in a new thread, awaits future.
+BE_STT -> Ext_AliCloud: Connects for STT
+BE_STT --> BE_Pipeline: return True
+deactivate BE_STT
+BE_Pipeline --> BE_AudioWS: return True
+deactivate BE_Pipeline
+BE_AudioWS --> FE_AudioCapture: Sends {"status": "ready"}
+deactivate BE_AudioWS
+
+
+FE_AudioCapture -> FE_AudioCapture: VAD detects speech
+loop For each audio chunk from VAD
+    FE_AudioCapture -> BE_AudioWS: Sends PCM audio chunk (bytes)
+    activate BE_AudioWS
+
+    BE_AudioWS -> BE_Pipeline: process_audio(audio_data)
+    activate BE_Pipeline
+
+    BE_Pipeline -> BE_STT: send_audio_chunk(audio_data)
+    activate BE_STT
+    BE_STT -> Ext_AliCloud: Streams audio chunk
+    
+    note right of BE_STT #SkyBlue
+        AliCloud calls back with results:
+        - _on_result_changed (intermediate)
+        - _on_sentence_end (final sentence)
+        'complete_sentences' list is populated here.
+    end note
+
+    BE_STT --> BE_Pipeline: Returns STTResponse (text, is_final)
+    deactivate BE_STT
+    
+    BE_Pipeline --> BE_AudioWS: Returns STTResponse
+    deactivate BE_Pipeline
+
+    opt Intermediate Result
+        BE_AudioWS --> FE_AudioCapture: Sends JSON {"text": ..., "is_final": false}
+        FE_AudioCapture -> FE_App: Emits 'transcript_update' event
+        FE_App -> FE_App: Updates UI with intermediate text
+    end opt
+    
+    deactivate BE_AudioWS
+end loop
+
+== Background Processing: Thinking and Responding ==
+
+note over BE_Pipeline, BE_STT #LightYellow
+    Meanwhile, PipelineService's _monitor_stt_buffer() task is running periodically.
+end note
+
+loop Check STT Buffer
+    BE_Pipeline -> BE_STT: get_complete_sentences()
+    activate BE_STT
+    BE_STT --> BE_Pipeline: Returns ["Hello world."_]
+    deactivate BE_STT
+    
+    BE_Pipeline -> BE_STT: clear_sentence_buffer()
+    activate BE_STT
+    deactivate BE_STT
+    
+    BE_Pipeline -> BE_LLM: simple_send_request_to_llm("Hello world.")
+    activate BE_LLM
+    BE_LLM -> Ext_Qwen: HTTP POST request with prompt
+    Ext_Qwen --> BE_LLM: HTTP response with generated text
+    BE_LLM --> BE_Pipeline: Returns "Hi there!"
+    deactivate BE_LLM
+    
+    BE_Pipeline -> BE_TTS: send_tts_request("Hi there!")
+    activate BE_TTS
+    note right of BE_TTS
+        Establishes WebSocket to MiniMax,
+        sends text, and returns an
+        AsyncIterator for the audio stream.
+    end note
+    BE_TTS -> Ext_MiniMax: Streams text, receives audio stream
+    BE_TTS --> BE_Pipeline: returns AsyncIterator[TTSResponse]
+    deactivate BE_TTS
+    
+    BE_Pipeline -> BE_TTSSender: send_tts_audio_stream(iterator)
+    activate BE_TTSSender
+    note right of BE_TTSSender
+        Uses UnifiedSocket to send
+        audio chunks to the frontend
+        via a dedicated socket.
+    end note
+
+    BE_TTSSender -> FE_AudioPlayer: Creates dedicated socket connection (TCP/Unix)
+    activate FE_AudioPlayer
+    
+    loop For each audio chunk in TTS stream
+        BE_TTSSender -> FE_AudioPlayer: Sends audio_chunk (bytes)
+        FE_AudioPlayer -> FE_AudioPlayer: Buffers and plays audio via Web Audio API
+    end loop
+    
+    deactivate BE_TTSSender
+    deactivate FE_AudioPlayer
+end
+
+== Session End ==
+
+User -> FE_App: Stops talking or clicks "Stop"
+FE_AudioCapture -> BE_AudioWS: Closes WebSocket connection
+destroy BE_AudioWS
+
+note over BE_Pipeline
+    The 'finally' block in /ws/audio endpoint
+    triggers the session end process.
+end note
+
+BE_Pipeline -> BE_STT: end_session()
+activate BE_STT
+BE_STT -> Ext_AliCloud: Sends end-of-stream signal
+Ext_AliCloud --> BE_STT: Returns final recognition result
+BE_STT --> BE_Pipeline: Returns final STTResponse
+deactivate BE_STT
+
+deactivate FE_AudioCapture
+deactivate FE_App
+
+@enduml 

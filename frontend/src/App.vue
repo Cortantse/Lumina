@@ -4,11 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import RealTimeVad from "./components/RealTimeVad.vue";
 import VadPlayback from "./components/VadPlayback.vue";
-import SiriWave from "./components/SiriWave.vue";
 
 const greetMsg = ref("");
 const name = ref("");
-const waveMode = ref<'idle' | 'listening' | 'speaking'>('idle');
 
 async function greet() {
   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -18,21 +16,8 @@ async function greet() {
 
 <template>
   <main class="container">
-    <h1>语音识别测试</h1>
-    
-    <div class="feature-section siri-section">
-      <h2>Siri 律动小球</h2>
-      <div class="siri-controls">
-        <button @click="waveMode = 'idle'" :class="{ active: waveMode === 'idle' }">待机</button>
-        <button @click="waveMode = 'listening'" :class="{ active: waveMode === 'listening' }">聆听</button>
-        <button @click="waveMode = 'speaking'" :class="{ active: waveMode === 'speaking' }">说话</button>
-      </div>
-      <div class="siri-container">
-        <SiriWave :mode="waveMode" />
-      </div>
-    </div>
 
-    <div class="feature-section">
+    <!-- <div class="feature-section">
       <h2>实时 VAD (语音活动检测)</h2>
       <RealTimeVad />
     </div>
@@ -40,10 +25,9 @@ async function greet() {
     <div class="feature-section">
       <h2>VAD语音段回放</h2>
       <VadPlayback />
-    </div>
+    </div> -->
 
     <div class="feature-section">
-      <h2>基础录音与回放</h2>
       <AudioPlayback />
     </div>
 
