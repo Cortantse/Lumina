@@ -9,6 +9,7 @@ from .config import (
     PREFERENCE_COMMANDS,
     RULE_MIN_CONFIDENCE
 )
+from .tts_config import VOICE_NAME_MAPPING
 
 
 class RuleBasedDetector:
@@ -80,6 +81,28 @@ class RuleBasedDetector:
         
     def _detect_tts_config(self, text: str) -> Optional[CommandResult]:
         """检测TTS配置类命令"""
+        # 特殊处理：直接检测是否提到了特定音色名称
+        if "换音色" in text or "换声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
+            voice_name = self._extract_voice_name(text)
+            if voice_name:
+                voice_params = {}
+                
+                # 如果是直接使用voice_id（音色值如"male-qn-qingse"）
+                if voice_name in VOICE_NAME_MAPPING.values():
+                    voice_params["voice_id"] = voice_name
+                else:
+                    # 否则是使用音色名称
+                    voice_params["voice_name"] = voice_name
+                
+                confidence = 0.85  # 直接指定音色名称，给予较高置信度
+                return CommandResult(
+                    command_type=CommandType.TTS_CONFIG,
+                    action="set_voice",
+                    params=voice_params,
+                    confidence=confidence
+                )
+                
+        # 常规TTS配置命令检测
         for action, config in TTS_CONFIG_COMMANDS.items():
             keywords = config["keywords"]
             params_dict = config["params"]
@@ -91,6 +114,21 @@ class RuleBasedDetector:
                     params = {}
                     max_confidence = 0.0
                     
+                    # 特殊处理语速数值
+                    if action == "set_speed":
+                        # 尝试直接解析数值
+                        speed_value = self._extract_speed_value(text)
+                        if speed_value is not None:
+                            params = {"speed": speed_value}
+                            confidence = self._calculate_confidence(text, keyword) * 1.2  # 精确匹配数值，提高置信度
+                            return CommandResult(
+                                command_type=CommandType.TTS_CONFIG,
+                                action=action,
+                                params=params,
+                                confidence=min(confidence, 1.0)  # 确保置信度不超过1.0
+                            )
+                    
+                    # 常规参数匹配
                     for param_key, param_value in params_dict.items():
                         if param_key in text:
                             param_confidence = self._calculate_confidence(text, param_key)
@@ -234,13 +272,80 @@ class RuleBasedDetector:
     
     def _detect_media_type(self, text: str) -> str:
         """检测多媒体类型"""
-        # 简单检测文本中是否包含媒体类型关键词
-        if any(word in text for word in ["图", "图片", "照片", "截图", "图像"]):
+        # 简单识别图片和音频
+        if any(word in text for word in ["图片", "照片", "图像", "截图", "看看"]):
             return "image"
-        if any(word in text for word in ["音频", "声音", "听", "录音"]):
+        elif any(word in text for word in ["音频", "声音", "语音", "听听"]):
             return "audio"
-        if any(word in text for word in ["视频", "电影", "影片"]):
-            return "video"
+        else:
+            return "unknown"
+            
+    def _extract_speed_value(self, text: str) -> Optional[float]:
+        """
+        从文本中提取语速数值，支持多种表达方式
         
-        # 默认返回未知类型
-        return "unknown" 
+        Args:
+            text: 输入文本
+            
+        Returns:
+            提取的语速数值，如果未找到则返回None
+        """
+        # 匹配"X倍速"格式
+        match = re.search(r"(\d+(?:\.\d+)?)\s*倍速", text)
+        if match:
+            return float(match.group(1))
+            
+        # 匹配"X.X倍"格式
+        match = re.search(r"(\d+(?:\.\d+)?)\s*倍", text)
+        if match:
+            return float(match.group(1))
+            
+        # 匹配百分比格式
+        match = re.search(r"(\d+)%", text)
+        if match:
+            percentage = int(match.group(1))
+            return percentage / 100.0
+            
+        # 未找到匹配
+        return None
+        
+    def _extract_voice_name(self, text: str) -> Optional[str]:
+        """
+        从文本中提取音色名称或音色ID
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            提取的音色名称或ID，如果未找到则返回None
+        """
+        # 1. 先检查是否直接包含音色ID（直接匹配VOICE_NAME_MAPPING的值）
+        for voice_id in VOICE_NAME_MAPPING.values():
+            if voice_id in text:
+                return voice_id
+                
+        # 2. 检查是否包含音色名称（中文名）
+        for voice_name in VOICE_NAME_MAPPING:
+            if voice_name in text:
+                return voice_name
+                
+        # 3. 检查常见的引导模式
+        patterns = [
+            r"(?:使用|换成|切换到|改成|用|换)([\w\-]+音色|[\w\-]+声音|[\w\-]+)",
+            r"(?:音色|声音|声线)(?:设置|调整|改变|改为|换成|切换为)([\w\-]+)"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                extracted = match.group(1).strip()
+                # 如果匹配到的是完整音色名，直接返回
+                if extracted in VOICE_NAME_MAPPING:
+                    return extracted
+                # 否则查看是否部分匹配
+                for voice_name in VOICE_NAME_MAPPING:
+                    if extracted in voice_name:
+                        return voice_name
+                        
+        # 未找到匹配
+        return None 

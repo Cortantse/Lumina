@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, Optional, Callable, List
 
 from .schema import CommandResult, TTSConfigAction
+from app.protocols.tts import ALLOWED_VOICE_IDS, DEFAULT_VOICE_ID
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class TTSConfigHandler:
         处理设置音色的命令
         
         Args:
-            params: 命令参数，可能包含gender、age等属性
+            params: 命令参数，可能包含gender、age、voice_id、voice_name等属性
             
         Returns:
             处理结果
@@ -68,24 +69,48 @@ class TTSConfigHandler:
                 logger.warning("TTS client not available for set_voice action")
                 return {"success": False, "message": "TTS客户端未设置，无法执行音色设置"}
             
-            # 提取参数
-            gender = params.get("gender")
-            age = params.get("age")
+            # 处理逻辑：优先使用直接的voice_id，其次是voice_name，然后是gender/age组合
+            voice_id = None
+            display_name = ""
             
-            # 根据参数选择合适的语音模型或ID
-            voice_id = self._select_voice_id(gender=gender, age=age)
-            
-            # 设置语音
-            if voice_id:
-                self.tts_client.set_voice(voice_id)
-                return {
-                    "success": True, 
-                    "message": f"已设置声音为: {gender or ''} {age or ''}", 
-                    "voice_id": voice_id
-                }
-            else:
-                return {"success": False, "message": "无法找到匹配的声音设置"}
+            # 1. 处理直接指定的voice_id
+            if "voice_id" in params:
+                voice_id = params["voice_id"]
+                display_name = f"声音ID: {voice_id}"
                 
+            # 2. 处理通过voice_name指定的情况
+            elif "voice_name" in params:
+                voice_name = params["voice_name"]
+                # 检查是否在映射表中
+                if voice_name in ALLOWED_VOICE_IDS:
+                    voice_id = ALLOWED_VOICE_IDS[voice_name]
+                    display_name = f"{voice_name}"
+                else:
+                    # 尝试直接使用voice_name作为voice_id
+                    voice_id = voice_name
+                    display_name = f"声音: {voice_name}"
+                    
+            # 3. 如果没有直接指定ID或名称，则使用gender/age组合方式
+            else:
+                gender = params.get("gender")
+                age = params.get("age")
+                voice_id = self._select_voice_id(gender=gender, age=age)
+                display_name = f"{gender or ''} {age or ''}"
+            
+            # 验证voice_id是否有效
+            if voice_id not in ALLOWED_VOICE_IDS:
+                logger.warning(f"voice_id {voice_id} 不在允许列表，使用默认值 {DEFAULT_VOICE_ID}")
+                voice_id = DEFAULT_VOICE_ID
+                display_name = "默认声音"
+                
+            # 设置音色
+            self.tts_client.set_voice(voice_id)
+            
+            return {
+                "success": True, 
+                "message": f"已设置声音为: {display_name}", 
+                "voice_id": voice_id
+            }
         except Exception as e:
             logger.error(f"Error in set_voice: {str(e)}")
             return {"success": False, "message": f"设置声音失败: {str(e)}"}
@@ -182,26 +207,26 @@ class TTSConfigHandler:
         # 假设有以下语音ID可用
         voice_mapping = {
             # 男性声音
-            ("male", "adult"): "male_adult_1",
-            ("male", "elder"): "male_elder_1",
-            ("male", "young"): "male_young_1",
-            ("male", "child"): "male_child_1",
+            ("male", "adult"): "male-qn-jingying",
+            ("male", "elder"): "audiobook_male_1",
+            ("male", "young"): "male-qn-qingse",
+            ("male", "child"): "clever_boy",
             # 默认男声
-            ("male", None): "male_adult_1",
+            ("male", None): "male-qn-jingying",
             
             # 女性声音
-            ("female", "adult"): "female_adult_1",
-            ("female", "elder"): "female_elder_1",
-            ("female", "young"): "female_young_1",
-            ("female", "child"): "female_child_1",
+            ("female", "adult"): "female-chengshu",
+            ("female", "elder"): "female-yujie",
+            ("female", "young"): "female-shaonv",
+            ("female", "child"): "lovely_girl",
             # 默认女声
-            ("female", None): "female_adult_1",
+            ("female", None): "female-chengshu",
             
             # 只有年龄的情况
-            (None, "adult"): "male_adult_1",  # 默认成年人用男声
-            (None, "elder"): "male_elder_1",
-            (None, "young"): "female_young_1",
-            (None, "child"): "female_child_1",
+            (None, "adult"): "male-qn-jingying",  # 默认成年人用男声
+            (None, "elder"): "audiobook_male_1",
+            (None, "young"): "female-shaonv",
+            (None, "child"): "lovely_girl",
         }
         
         # 根据参数查找语音ID
@@ -217,7 +242,7 @@ class TTSConfigHandler:
             
         # 如果还是没找到，返回默认值
         if not voice_id:
-            voice_id = "female_adult_1"  # 默认使用成年女声
+            voice_id = DEFAULT_VOICE_ID  # 使用系统默认音色
             
         return voice_id
     

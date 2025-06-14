@@ -24,37 +24,56 @@ CONTROL_COMMANDS = {
 TTS_CONFIG_COMMANDS = {
     # 音色设置
     "set_voice": {
-        "keywords": ["换声音", "更换声音", "换个声音", "切换声音", "更换音色", "换音色"],
+        "keywords": ["换声音", "更换声音", "换个声音", "切换声音", "更换音色", "换音色", "用男声", "用女声", "使用男声", "使用女声", "听男声", "听女声"],
         "params": {
             "男声": {"gender": "male"},
             "女声": {"gender": "female"},
             "成年": {"age": "adult"},
             "老年": {"age": "elder"},
             "青年": {"age": "young"},
-            "儿童": {"age": "child"}
+            "儿童": {"age": "child"},
+            "年轻": {"age": "young"},
+            "年长": {"age": "elder"},
+            "成熟": {"age": "adult"},
+            "男": {"gender": "male"},
+            "女": {"gender": "female"}
         }
     },
     # 风格设置
     "set_style": {
-        "keywords": ["说话风格", "语气", "语调", "说话方式", "语音风格"],
+        "keywords": ["说话风格", "语气", "语调", "说话方式", "语音风格", "用温柔的", "用正式的", "用活泼的", "用严肃的", "用轻松的", "用专业的", "声音风格"],
         "params": {
             "温柔": {"tone": "gentle"},
             "正式": {"tone": "formal"},
             "活泼": {"tone": "lively"},
             "严肃": {"tone": "serious"},
             "轻松": {"tone": "relaxed"},
-            "专业": {"tone": "professional"}
+            "专业": {"tone": "professional"},
+            "柔和": {"tone": "gentle"},
+            "热情": {"tone": "lively"},
+            "认真": {"tone": "serious"},
+            "悠闲": {"tone": "relaxed"},
+            "专家": {"tone": "professional"}
         }
     },
     # 语速设置
     "set_speed": {
-        "keywords": ["语速", "说话速度", "说话快慢", "语音速度"],
+        "keywords": ["语速", "说话速度", "说话快慢", "语音速度", "快点说", "慢点说", "说快点", "说慢点", "加快语速", "放慢语速", "调整语速"],
         "params": {
             "快一点": {"speed": 1.2},
             "慢一点": {"speed": 0.8},
             "正常速度": {"speed": 1.0},
             "很快": {"speed": 1.5},
-            "很慢": {"speed": 0.6}
+            "很慢": {"speed": 0.6},
+            "快点": {"speed": 1.2},
+            "慢点": {"speed": 0.8},
+            "加快": {"speed": 1.3},
+            "放慢": {"speed": 0.7},
+            "极快": {"speed": 1.8},
+            "极慢": {"speed": 0.5},
+            "中速": {"speed": 1.0},
+            "快速": {"speed": 1.4},
+            "慢速": {"speed": 0.7}
         }
     }
 }

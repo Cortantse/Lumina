@@ -44,6 +44,12 @@ class PipelineService:
         self.tts_monitor_task = None
         self.check_interval = 0.01  # 检查STT缓冲区的间隔时间（秒） # TODO 轮询慢且卡
         
+        # 初始化并注册命令检测器
+        from app.command.detector import CommandDetector
+        self.command_detector = CommandDetector()
+        self.command_detector.set_tts_client(self.tts_client)
+        self.command_detector.register_text_callback(self)
+        
         # print("【调试】PipelineService初始化完成")
         
     def register_text_callback(self, callback: Callable[[str, bool], Any]) -> None:
@@ -198,8 +204,9 @@ class PipelineService:
                         # 将所有句子合并为一段文本
                         text = "，".join(sentences)
                         # print(f"【调试】合并后的文本: '{text}'")
-
-                        # TODO: 这里应该等待 std 检测完成后才能清空 现在简化 
+                        
+                        # 异步处理命令
+                        command_task = asyncio.create_task(self.command_detector.process_async(text))
                         
                         # 清空缓冲区  
                         cleared_count = await self.stt_client.clear_sentence_buffer()
@@ -210,10 +217,19 @@ class PipelineService:
 
                         from app.llm.qwen_client import simple_send_request_to_llm
 
-                        text = await simple_send_request_to_llm(text)
+                        response_text = await simple_send_request_to_llm(text)
+                        
+                        # 检查命令处理结果
+                        command_result = await command_task
+                        if command_result.get("is_command", False):
+                            print(f"执行命令: {command_result.get('message', '')}")
+                            
+                            # 如果是TTS配置类命令，可能影响后续TTS
+                            if command_result.get("command_info", {}).get("type") == "TTS_CONFIG":
+                                print(f"应用TTS配置: {command_result.get('message', '')}")
 
                         # 获取音频流并发送到前端
-                        audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
+                        audio_stream = self.tts_client.send_tts_request(self.tts_emotion, response_text)
                         await send_tts_audio_stream(audio_stream)
                         
                         self.tts_playing = False

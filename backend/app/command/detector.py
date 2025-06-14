@@ -142,6 +142,7 @@ class CommandDetector:
         """
         # 检测命令
         command_result = self.detect_command(text)
+        print(f"【调试】command_result: {command_result}")
         
         # 执行命令
         if command_result.is_command():
@@ -155,3 +156,41 @@ class CommandDetector:
                 "is_command": False,
                 "command_info": command_result.to_dict()
             }
+            
+    async def process_async(self, text: str) -> Dict[str, Any]:
+        """
+        异步处理输入文本，检测并执行命令
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            处理结果
+        """
+        # 这里使用同步方法处理，但返回异步结果
+        # 未来可以改为真正的异步实现
+        import asyncio
+        
+        # 使用线程池执行耗时操作，避免阻塞事件循环
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, self.process, text
+        )
+        
+        return result
+        
+    def register_text_callback(self, pipeline_service) -> None:
+        """
+        注册到pipeline服务的文本回调
+        
+        Args:
+            pipeline_service: Pipeline服务实例
+        """
+        # 注册命令处理回调
+        async def command_callback(text: str) -> Optional[Dict[str, Any]]:
+            result = await self.process_async(text)
+            if result.get("is_command", False):
+                return result
+            return None
+            
+        # 将回调注册到pipeline服务
+        pipeline_service.register_text_callback(command_callback)
