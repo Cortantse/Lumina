@@ -139,13 +139,11 @@ class MiniMaxTTSClient(TTSClient):
 
     def set_voice(self, voice_id: str) -> None:
         """设置默认语音ID"""
-        voice_id = voice_id.strip()
-        allowed_values = list(ALLOWED_VOICE_IDS.values())
-        if voice_id not in allowed_values and voice_id != DEFAULT_VOICE_ID:
+        if voice_id in ALLOWED_VOICE_IDS:
+            self.default_voice_id = voice_id
+        else:
             print(f"警告: voice_id {voice_id} 不在允许列表，使用默认值 {DEFAULT_VOICE_ID}")
             self.default_voice_id = DEFAULT_VOICE_ID
-        else:
-            self.default_voice_id = voice_id
         
     def set_speed(self, speed: float) -> None:
         """设置默认语速"""
