@@ -7,6 +7,8 @@ from app.protocols.stt import AudioData, STTResponse, STTClient
 from app.protocols.stt import create_alicloud_stt_client
 from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion
 from app.tts.send_tts import send_tts_audio_stream
+# 初始化并注册命令检测器
+from app.command.detector import CommandDetector
 
 
 class PipelineService:
@@ -44,12 +46,9 @@ class PipelineService:
         self.tts_monitor_task = None
         self.check_interval = 0.01  # 检查STT缓冲区的间隔时间（秒） # TODO 轮询慢且卡
         
-        # 初始化并注册命令检测器
-        from app.command.detector import CommandDetector
         self.command_detector = CommandDetector()
         self.command_detector.set_tts_client(self.tts_client)
         self.command_detector.register_text_callback(self)
-        
         # print("【调试】PipelineService初始化完成")
         
     def register_text_callback(self, callback: Callable[[str, bool], Any]) -> None:
@@ -206,7 +205,7 @@ class PipelineService:
                         # print(f"【调试】合并后的文本: '{text}'")
                         
                         # 异步处理命令
-                        command_task = asyncio.create_task(self.command_detector.process_async(text))
+                        command_task = asyncio.create_task(self.command_detector.process(text))
                         
                         # 清空缓冲区  
                         cleared_count = await self.stt_client.clear_sentence_buffer()

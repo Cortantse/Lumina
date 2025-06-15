@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 
 from .schema import CommandType, CommandResult
 from .rule_based import RuleBasedDetector
-from .llm_based import LLMBasedDetector
+# from .llm_based import LLMBasedDetector
 from .control import ControlHandler
 from .memory_ops import MemoryHandler
 from .tts_config import TTSConfigHandler
@@ -28,7 +28,7 @@ class CommandDetector:
         self.rule_detector = RuleBasedDetector()
         
         # 初始化LLM检测器
-        self.llm_detector = LLMBasedDetector(llm_client)
+        # self.llm_detector = LLMBasedDetector(llm_client)
         
         # 初始化各处理器
         self.handler_map = {
@@ -75,9 +75,9 @@ class CommandDetector:
         if CommandType.CONTROL in self.handler_map:
             self.handler_map[CommandType.CONTROL].set_session_manager(session_manager)
     
-    def detect_command(self, text: str) -> CommandResult:
+    async def detect_command(self, text: str) -> CommandResult:
         """
-        检测文本中是否包含命令
+        异步检测文本中是否包含命令
         
         Args:
             text: 输入文本
@@ -91,22 +91,25 @@ class CommandDetector:
             
             # 如果规则检测器识别到命令，直接返回
             if rule_result:
-                logger.debug(f"Rule-based detector found command: {rule_result}")
+                print(f"Rule-based detector found command: {rule_result}")
                 return rule_result
             
             # 否则，使用LLM检测器
-            llm_result = self.llm_detector.detect(text)
-            logger.debug(f"LLM-based detector found command: {llm_result}")
-            return llm_result
+            # llm_result = await self.llm_detector.detect_async(text)
+            # logger.debug(f"LLM-based detector found command: {llm_result}")
+            # return llm_result
             
         except Exception as e:
             logger.error(f"Error in command detection: {str(e)}")
             # 出错时返回NONE类型的命令结果
             return CommandResult(CommandType.NONE)
+        
+        # 如果没有检测到命令，返回NONE类型
+        return CommandResult(CommandType.NONE)
     
-    def execute_command(self, command_result: CommandResult) -> Dict[str, Any]:
+    async def execute_command(self, command_result: CommandResult) -> Dict[str, Any]:
         """
-        执行检测到的命令
+        异步执行检测到的命令
         
         Args:
             command_result: 命令结果对象
@@ -123,16 +126,23 @@ class CommandDetector:
         handler = self.handler_map.get(command_type)
         
         if handler:
-            result = handler.handle(command_result)
+            # 检查处理器是否支持异步处理
+            if hasattr(handler, 'handle_async'):
+                result = await handler.handle_async(command_result)
+            else:
+                # 如果不支持异步，使用同步方法
+                import asyncio
+                result = await asyncio.to_thread(handler.handle, command_result)
+                
             result["is_command"] = True
             return result
         else:
             logger.warning(f"No handler found for command type: {command_type}")
             return {"success": False, "message": f"无法处理的命令类型: {command_type}", "is_command": True}
     
-    def process(self, text: str) -> Dict[str, Any]:
+    async def process(self, text: str) -> Dict[str, Any]:
         """
-        处理输入文本，检测并执行命令
+        异步处理输入文本，检测并执行命令
         
         Args:
             text: 输入文本
@@ -140,13 +150,13 @@ class CommandDetector:
         Returns:
             处理结果
         """
-        # 检测命令
-        command_result = self.detect_command(text)
-        print(f"【调试】command_result: {command_result}")
+        # 异步检测命令
+        command_result = await self.detect_command(text)
+        # print(f"【调试】command_result: {command_result}")
         
-        # 执行命令
+        # 异步执行命令
         if command_result.is_command():
-            result = self.execute_command(command_result)
+            result = await self.execute_command(command_result)
             result["command_info"] = command_result.to_dict()
             return result
         else:
@@ -157,26 +167,6 @@ class CommandDetector:
                 "command_info": command_result.to_dict()
             }
             
-    async def process_async(self, text: str) -> Dict[str, Any]:
-        """
-        异步处理输入文本，检测并执行命令
-        
-        Args:
-            text: 输入文本
-            
-        Returns:
-            处理结果
-        """
-        # 这里使用同步方法处理，但返回异步结果
-        # 未来可以改为真正的异步实现
-        import asyncio
-        
-        # 使用线程池执行耗时操作，避免阻塞事件循环
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, self.process, text
-        )
-        
-        return result
         
     def register_text_callback(self, pipeline_service) -> None:
         """
@@ -187,7 +177,7 @@ class CommandDetector:
         """
         # 注册命令处理回调
         async def command_callback(text: str) -> Optional[Dict[str, Any]]:
-            result = await self.process_async(text)
+            result = await self.process(text)
             if result.get("is_command", False):
                 return result
             return None

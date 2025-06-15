@@ -97,11 +97,6 @@ class TTSConfigHandler:
                 voice_id = self._select_voice_id(gender=gender, age=age)
                 display_name = f"{gender or ''} {age or ''}"
             
-            # 验证voice_id是否有效
-            if voice_id not in ALLOWED_VOICE_IDS:
-                logger.warning(f"voice_id {voice_id} 不在允许列表，使用默认值 {DEFAULT_VOICE_ID}")
-                voice_id = DEFAULT_VOICE_ID
-                display_name = "默认声音"
                 
             # 设置音色
             self.tts_client.set_voice(voice_id)

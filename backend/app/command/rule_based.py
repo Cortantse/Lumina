@@ -9,7 +9,7 @@ from .config import (
     PREFERENCE_COMMANDS,
     RULE_MIN_CONFIDENCE
 )
-from .tts_config import VOICE_NAME_MAPPING
+from app.protocols.tts import ALLOWED_VOICE_IDS
 
 
 class RuleBasedDetector:
@@ -82,13 +82,15 @@ class RuleBasedDetector:
     def _detect_tts_config(self, text: str) -> Optional[CommandResult]:
         """检测TTS配置类命令"""
         # 特殊处理：直接检测是否提到了特定音色名称
-        if "换音色" in text or "换声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
+        print(f"【调试】text-tts_config: {text}")
+        if "音色" in text or "声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
             voice_name = self._extract_voice_name(text)
+            print(f"【调试】voice_name: {voice_name}")
             if voice_name:
                 voice_params = {}
                 
                 # 如果是直接使用voice_id（音色值如"male-qn-qingse"）
-                if voice_name in VOICE_NAME_MAPPING.values():
+                if voice_name in ALLOWED_VOICE_IDS.values():
                     voice_params["voice_id"] = voice_name
                 else:
                     # 否则是使用音色名称
@@ -319,13 +321,13 @@ class RuleBasedDetector:
         Returns:
             提取的音色名称或ID，如果未找到则返回None
         """
-        # 1. 先检查是否直接包含音色ID（直接匹配VOICE_NAME_MAPPING的值）
-        for voice_id in VOICE_NAME_MAPPING.values():
+        # 1. 先检查是否直接包含音色ID（直接匹配ALLOWED_VOICE_IDS的值）
+        for voice_id in ALLOWED_VOICE_IDS.values():
             if voice_id in text:
                 return voice_id
                 
         # 2. 检查是否包含音色名称（中文名）
-        for voice_name in VOICE_NAME_MAPPING:
+        for voice_name in ALLOWED_VOICE_IDS:
             if voice_name in text:
                 return voice_name
                 
@@ -340,12 +342,13 @@ class RuleBasedDetector:
             if match:
                 extracted = match.group(1).strip()
                 # 如果匹配到的是完整音色名，直接返回
-                if extracted in VOICE_NAME_MAPPING:
+                if extracted in ALLOWED_VOICE_IDS:
                     return extracted
                 # 否则查看是否部分匹配
-                for voice_name in VOICE_NAME_MAPPING:
+                for voice_name in ALLOWED_VOICE_IDS:
                     if extracted in voice_name:
                         return voice_name
                         
-        # 未找到匹配
-        return None 
+        # 未找到匹配，随机返回一个音色
+        import random
+        return random.choice(list(ALLOWED_VOICE_IDS.values()))
