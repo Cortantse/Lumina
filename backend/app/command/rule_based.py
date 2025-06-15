@@ -351,4 +351,8 @@ class RuleBasedDetector:
                         
         # 未找到匹配，随机返回一个音色
         import random
+<<<<<<< HEAD
         return random.choice(list(ALLOWED_VOICE_IDS.values()))
+=======
+        return random.choice(list(ALLOWED_VOICE_IDS.values()))
+>>>>>>> 0145d75 (rebase tts前的commit)
