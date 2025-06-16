@@ -59,7 +59,7 @@ class RuleBasedDetector:
             result = preference_result
             confidence = preference_result.confidence
             
-        # 如果置信度低于阈值，则返回None，表示需要使用LLM进行检测
+        # 如果置信度低于阈值，则返回None，表示需要使用进行语义匹配检测
         if result and result.confidence >= RULE_MIN_CONFIDENCE:
             return result
         return None
@@ -83,7 +83,7 @@ class RuleBasedDetector:
         """检测TTS配置类命令"""
         # 特殊处理：直接检测是否提到了特定音色名称
         print(f"【调试】text-tts_config: {text}")
-        if "音色" in text or "声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
+        if "切換音色" in text or "修改声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
             voice_name = self._extract_voice_name(text)
             print(f"【调试】voice_name: {voice_name}")
             if voice_name:
@@ -351,8 +351,4 @@ class RuleBasedDetector:
                         
         # 未找到匹配，随机返回一个音色
         import random
-<<<<<<< HEAD
         return random.choice(list(ALLOWED_VOICE_IDS.values()))
-=======
-        return random.choice(list(ALLOWED_VOICE_IDS.values()))
->>>>>>> 0145d75 (rebase tts前的commit)

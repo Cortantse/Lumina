@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 
 from .schema import CommandType, CommandResult
 from .rule_based import RuleBasedDetector
-# from .llm_based import LLMBasedDetector
+from .semantic_matcher import SemanticMatcher  # 导入语义匹配器
 from .control import ControlHandler
 from .memory_ops import MemoryHandler
 from .tts_config import TTSConfigHandler
@@ -26,6 +26,9 @@ class CommandDetector:
         """
         # 初始化规则检测器
         self.rule_detector = RuleBasedDetector()
+        
+        # 初始化语义匹配器
+        self.semantic_matcher = SemanticMatcher()
         
         # 初始化LLM检测器
         # self.llm_detector = LLMBasedDetector(llm_client)
@@ -94,7 +97,13 @@ class CommandDetector:
                 print(f"Rule-based detector found command: {rule_result}")
                 return rule_result
             
-            # 否则，使用LLM检测器
+            # 使用语义匹配器进行检测
+            semantic_result = await self.semantic_matcher.match(text)
+            if semantic_result:
+                print(f"Semantic matcher found command: {semantic_result}")
+                return semantic_result
+            
+            # 最后，使用LLM检测器（如果启用）
             # llm_result = await self.llm_detector.detect_async(text)
             # logger.debug(f"LLM-based detector found command: {llm_result}")
             # return llm_result
@@ -121,6 +130,7 @@ class CommandDetector:
             return {"success": True, "message": "无需执行的命令", "is_command": False}
         
         command_type = command_result.type
+        print(f"【调试】command_type: {command_type}")
         
         # 查找对应的处理器
         handler = self.handler_map.get(command_type)
@@ -156,6 +166,7 @@ class CommandDetector:
         
         # 异步执行命令
         if command_result.is_command():
+            print(f"【调试】command_result: {command_result}")
             result = await self.execute_command(command_result)
             result["command_info"] = command_result.to_dict()
             return result

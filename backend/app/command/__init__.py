@@ -14,6 +14,7 @@ from .memory_ops import MemoryHandler
 from .tts_config import TTSConfigHandler
 from .multimodal import MultimodalHandler
 from .preference import PreferenceHandler
+from .semantic_matcher import SemanticMatcher
 
 __all__ = [
     'CommandDetector',
@@ -29,4 +30,5 @@ __all__ = [
     'TTSConfigHandler',
     'MultimodalHandler',
     'PreferenceHandler',
+    'SemanticMatcher',
 ]

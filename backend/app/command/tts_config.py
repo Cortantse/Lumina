@@ -64,6 +64,9 @@ class TTSConfigHandler:
         Returns:
             处理结果
         """
+        # 使用全局导入的模块和变量
+        import random  # 添加random模块导入
+        
         try:
             if not self.tts_client:
                 logger.warning("TTS client not available for set_voice action")
@@ -97,15 +100,124 @@ class TTSConfigHandler:
                 voice_id = self._select_voice_id(gender=gender, age=age)
                 display_name = f"{gender or ''} {age or ''}"
             
-                
-            # 设置音色
-            self.tts_client.set_voice(voice_id)
+            # 参数为空的情况，直接使用随机声音
+            if not voice_id or not params:
+                logger.info("切换声音参数为空，随机选择声音")
+                # 随机选择一个声音
+                available_voices = list(ALLOWED_VOICE_IDS.values())
+                if available_voices:
+                    random_voice_id = random.choice(available_voices)
+                    # 找到对应的名称
+                    for name, vid in ALLOWED_VOICE_IDS.items():
+                        if vid == random_voice_id:
+                            display_name = name
+                            break
+                    else:
+                        display_name = f"随机声音: {random_voice_id}"
+                    
+                    # 设置随机选择的声音
+                    try:
+                        self.tts_client.set_voice(random_voice_id)
+                        logger.info(f"已随机切换到声音: {display_name}")
+                        return {
+                            "success": True, 
+                            "message": f"已设置声音为: {display_name}", 
+                            "voice_id": random_voice_id
+                        }
+                    except Exception as e:
+                        logger.error(f"设置随机声音失败: {str(e)}")
+                        # 如果随机设置也失败，使用默认声音
+                        try:
+                            self.tts_client.set_voice(DEFAULT_VOICE_ID)
+                            return {
+                                "success": True, 
+                                "message": "已设置为默认声音", 
+                                "voice_id": DEFAULT_VOICE_ID
+                            }
+                        except Exception as e2:
+                            logger.error(f"设置默认声音也失败: {str(e2)}")
+                            return {"success": False, "message": f"无法设置任何声音: {str(e2)}"}
+                else:
+                    # 如果没有可用声音列表，使用默认声音
+                    try:
+                        self.tts_client.set_voice(DEFAULT_VOICE_ID)
+                        return {
+                            "success": True, 
+                            "message": "已设置为默认声音", 
+                            "voice_id": DEFAULT_VOICE_ID
+                        }
+                    except Exception as e:
+                        logger.error(f"设置默认声音失败: {str(e)}")
+                        return {"success": False, "message": f"无法设置默认声音: {str(e)}"}
             
-            return {
-                "success": True, 
-                "message": f"已设置声音为: {display_name}", 
-                "voice_id": voice_id
-            }
+            # 尝试设置指定的声音
+            try:
+                if voice_id:
+                    voice_id = voice_id.strip()
+                    self.tts_client.set_voice(voice_id)
+                    return {
+                        "success": True, 
+                        "message": f"已设置声音为: {display_name}", 
+                        "voice_id": voice_id
+                    }
+                else:
+                    # 这应该不会发生，因为前面已经处理了voice_id为空的情况
+                    logger.warning("声音ID为空，使用默认声音")
+                    self.tts_client.set_voice(DEFAULT_VOICE_ID)
+                    return {
+                        "success": True, 
+                        "message": "已设置为默认声音", 
+                        "voice_id": DEFAULT_VOICE_ID
+                    }
+            except Exception as e:
+                # 如果设置失败，尝试随机选择一个
+                logger.warning(f"设置声音 {voice_id} 失败: {str(e)}，尝试随机选择")
+                available_voices = list(ALLOWED_VOICE_IDS.values())
+                if available_voices:
+                    random_voice_id = random.choice(available_voices)
+                    # 找到对应的名称
+                    for name, vid in ALLOWED_VOICE_IDS.items():
+                        if vid == random_voice_id:
+                            display_name = name
+                            break
+                    else:
+                        display_name = f"随机声音: {random_voice_id}"
+                    
+                    # 设置随机选择的声音
+                    try:
+                        self.tts_client.set_voice(random_voice_id)
+                        logger.info(f"已随机切换到声音: {display_name}")
+                        return {
+                            "success": True, 
+                            "message": f"原声音设置失败，已切换为: {display_name}", 
+                            "voice_id": random_voice_id
+                        }
+                    except Exception as e2:
+                        logger.error(f"设置随机声音也失败: {str(e2)}")
+                        # 如果随机设置也失败，尝试使用默认声音
+                        try:
+                            self.tts_client.set_voice(DEFAULT_VOICE_ID)
+                            return {
+                                "success": True, 
+                                "message": "已设置为默认声音", 
+                                "voice_id": DEFAULT_VOICE_ID
+                            }
+                        except Exception as e3:
+                            logger.error(f"设置默认声音也失败: {str(e3)}")
+                            return {"success": False, "message": "无法设置任何声音"}
+                else:
+                    # 如果没有可用声音，也尝试使用默认声音
+                    try:
+                        self.tts_client.set_voice(DEFAULT_VOICE_ID)
+                        return {
+                            "success": True, 
+                            "message": "已设置为默认声音", 
+                            "voice_id": DEFAULT_VOICE_ID
+                        }
+                    except Exception as e2:
+                        logger.error(f"设置默认声音失败: {str(e2)}")
+                        return {"success": False, "message": f"无法设置默认声音: {str(e2)}"}
+                
         except Exception as e:
             logger.error(f"Error in set_voice: {str(e)}")
             return {"success": False, "message": f"设置声音失败: {str(e)}"}

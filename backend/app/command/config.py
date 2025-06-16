@@ -130,56 +130,5 @@ PREFERENCE_COMMANDS = {
     }
 }
 
-# LLM命令识别提示词模板
-LLM_COMMAND_PROMPT = """
-你的任务是识别用户输入中是否包含特殊指令，并将其分类为对应的命令类型和动作。
-
-可能的命令类型包括：
-1. CONTROL: 控制类指令，如暂停、继续、重播
-2. MEMORY: 记忆操作类指令，如查询、删除、保存记忆
-3. TTS_CONFIG: TTS配置类指令，如设置音色、语气、语速
-4. MULTIMODAL: 多模态触发类指令，如图像识别、音频处理
-5. PREFERENCE: 偏好设置类指令，如回复风格、语言设置
-6. NONE: 非命令
-
-请分析以下输入，并以JSON格式输出命令类型、动作和参数：
-
-用户输入: "{text}"
-
-输出格式:
-```json
-{{
-  "type": "命令类型",
-  "action": "具体动作",
-  "params": {{
-    "参数名": "参数值"
-  }},
-  "confidence": 0.0-1.0之间的置信度
-}}
-```
-
-如果不是命令，请返回:
-```json
-{{
-  "type": "NONE",
-  "action": null,
-  "params": {{}},
-  "confidence": 1.0
-}}
-```
-
-示例:
-1. 输入: "请暂停一下"
-   输出: {{"type": "CONTROL", "action": "pause_tts", "params": {{}}, "confidence": 0.95}}
-
-2. 输入: "你还记得我昨天说的事情吗？"
-   输出: {{"type": "MEMORY", "action": "query_memory", "params": {{"query": "昨天说的事情"}}, "confidence": 0.85}}
-"""
-
-# 规则检测的最小置信度阈值，低于此值将使用LLM进行检测
+# 规则检测的最小置信度阈值
 RULE_MIN_CONFIDENCE = 0.7
-
-# 自定义映射表，可根据用户偏好扩展
-CUSTOM_MAPPINGS: Dict[str, Any] = {
-    # 用户可以添加自定义映射
-}

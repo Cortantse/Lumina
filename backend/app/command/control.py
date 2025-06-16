@@ -93,8 +93,17 @@ class ControlHandler:
         """
         try:
             if self.tts_client:
-                self.tts_client.resume()
-                return {"success": True, "message": "已继续语音输出"}
+                try:
+                    self.tts_client.resume()
+                    return {"success": True, "message": "已继续语音输出"}
+                except AttributeError as ae:
+                    # 如果TTS客户端没有resume方法，尝试使用replay方法
+                    logger.warning(f"TTS客户端不支持resume方法: {str(ae)}")
+                    if hasattr(self.tts_client, 'replay'):
+                        self.tts_client.replay()
+                        return {"success": True, "message": "继续失败，已尝试重播最后一段语音"}
+                    else:
+                        return {"success": False, "message": "当前TTS客户端不支持继续或重播功能"}
             else:
                 logger.warning("TTS client not available for resume_tts action")
                 return {"success": False, "message": "TTS客户端未设置，无法执行继续操作"}
