@@ -1,13 +1,32 @@
 <template>
   <div class="audio-playback-container">
-    <!-- SiriWave 可视化组件 -->
-    <div class="siri-wave-container">
-      <SiriWave 
-        :mode="siriWaveMode"
-        :idleIntensity="0.3"
-        :listeningIntensity="currentListeningIntensity"
-        :speakingIntensity="currentSpeakingIntensity"
-      />
+    <!-- 音频播放状态指示器 -->
+    <div class="audio-playback-status" :class="{ 'active': isPlayingBackendAudio }">
+      后端音频播放状态: {{ isPlayingBackendAudio ? '正在播放' : '未播放' }}
+      <div class="audio-playback-indicator"></div>
+    </div>
+
+    <!-- SiriWave 可视化组件和识别结果区域 -->
+    <div class="main-content-row">
+      <div class="siri-wave-container">
+        <SiriWave 
+          :mode="siriWaveMode"
+          :idleIntensity="0.3"
+          :listeningIntensity="currentListeningIntensity"
+          :speakingIntensity="currentSpeakingIntensity"
+        />
+      </div>
+      
+      <div class="stt-results-container" v-if="true">
+        <h4>识别结果</h4>
+        <div class="stt-text" :class="{ 'final': isTextFinal }">
+          {{ recognizedText || '等待语音输入...' }}
+        </div>
+        <div class="debug-stt-info">
+          <p>语音状态: {{ isSpeaking ? '说话中' : '静音' }}</p>
+          <p>最后更新: {{ new Date().toLocaleTimeString() }}</p>
+        </div>
+      </div>
     </div>
 
     <!-- VAD 状态指示 -->
@@ -33,6 +52,23 @@
       </div>
     </div>
 
+    <!-- SiriWave状态和音频音量显示 -->
+    <div class="audio-status-panel">
+      <div class="status-item">
+        <span class="status-label">SiriWave状态:</span>
+        <span class="status-value" :class="`siri-${siriWaveMode}`">
+          {{ siriWaveMode }}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">音频音量:</span>
+        <div class="volume-meter">
+          <div class="volume-bar" :style="{width: `${currentAudioVolume * 100}%`}"></div>
+          <span class="volume-text">{{ (currentAudioVolume * 100).toFixed(1) }}%</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 控制按钮 -->
     <div class="controls">
       <button @click="() => toggleAudioCapture()" :class="{ active: isVadActive }">
@@ -46,6 +82,9 @@
         @click="showPlaybackDialog = true"
       >
         播放识别语音
+      </button>
+      <button @click="simulateSttResult" class="debug-button">
+        模拟STT结果
       </button>
     </div>
 
@@ -119,14 +158,6 @@
       </div>
     </div>
 
-    <!-- 语音识别结果区域 -->
-    <div class="stt-results" v-if="isVadActive || textHistory.length > 0">
-      <h4>识别结果</h4>
-      <div class="stt-text" :class="{ 'final': isTextFinal }">
-        {{ recognizedText || '等待语音输入...' }}
-      </div>
-    </div>
-    
     <!-- 历史记录 -->
     <div class="history-section" v-if="textHistory.length > 0">
       <h4>历史记录</h4>
@@ -176,7 +207,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onMounted, getCurrentInstance, computed, watch } from 'vue';
+import { ref, onUnmounted, onMounted, getCurrentInstance, watch } from 'vue';
 import { tauriApi } from '../services/tauriApi';
 import { AudioCaptureInterface, MicrophoneDevice, VadEventType } from '../types/audio-processor';
 import SiriWave from './SiriWave.vue';
@@ -196,8 +227,9 @@ const silenceDuration = ref(0);
 
 // --- SiriWave 相关状态 ---
 const siriWaveMode = ref<'idle' | 'listening' | 'speaking'>('idle');
-const currentListeningIntensity = ref(0.5); // 监听模式的动态强度
-const currentSpeakingIntensity = ref(0.75); // 说话模式的动态强度
+const currentListeningIntensity = ref(0.3); // 麦克风输入强度
+const currentSpeakingIntensity = ref(0.5);  // 音频播放强度
+const currentAudioVolume = ref(0); // 当前音频音量，用于显示
 const isPlayingBackendAudio = ref(false); // 是否正在播放后端音频
 
 // --- 识别与结果 ---
@@ -274,13 +306,20 @@ function handleSilenceEvent(event: CustomEvent) {
 // STT 结果
 function handleSttResult(event: CustomEvent) {
   const result = event.detail;
-  if (result.text) {
+  console.log('[调试-STT] 收到语音识别结果事件:', result);
+  
+  if (result && result.text) {
+    console.log(`[调试-STT] 文本内容: "${result.text}", 是否最终: ${result.isFinal}`);
     recognizedText.value = result.text;
-    isTextFinal.value = result.is_final;
-    if (result.is_final && result.text.trim()) {
+    isTextFinal.value = result.isFinal;
+    
+    if (result.isFinal && result.text.trim()) {
+      console.log('[调试-STT] 添加到历史记录:', result.text);
       textHistory.value.unshift(result.text);
       if (textHistory.value.length > 10) textHistory.value.pop();
     }
+  } else {
+    console.log('[调试-STT] 收到的结果不包含文本:', result);
   }
 }
 
@@ -319,33 +358,60 @@ const audioCaptureStoppedHandler = (_event: CustomEvent) => {
 
 // 后端音频播放开始
 const backendAudioStartHandler = (_event: CustomEvent) => {
-  console.log('[AudioPlayback] 后端音频开始播放');
+  console.log('[重要] 后端音频开始播放事件触发');
   isPlayingBackendAudio.value = true;
   
   // 通知 Rust 状态机
   tauriApi.invoke('audio_playback_started').catch(error => {
     console.error('通知音频播放开始失败:', error);
   });
+  
+  // 直接强制更新UI显示
+  statusText.value = '正在播放后端音频...';
+  
+  // 打印当前所有状态以便调试
+  console.log(`[状态检查] 播放状态=${isPlayingBackendAudio.value}, 状态机=${currentStateMachineState.value}, SiriWave=${siriWaveMode.value}`);
 };
 
 // 后端音频播放结束
 const backendAudioEndHandler = (_event: CustomEvent) => {
-  console.log('[AudioPlayback] 后端音频播放结束');
+  console.log('[重要] 后端音频播放结束事件触发');
   isPlayingBackendAudio.value = false;
   
   // 通知 Rust 状态机
   tauriApi.invoke('audio_playback_ended').catch(error => {
     console.error('通知音频播放结束失败:', error);
   });
+  
+  // 直接强制更新UI显示
+  statusText.value = '后端音频播放完成';
+  
+  // 打印当前所有状态以便调试
+  console.log(`[状态检查] 播放状态=${isPlayingBackendAudio.value}, 状态机=${currentStateMachineState.value}, SiriWave=${siriWaveMode.value}`);
 };
 
 // 后端音频特征更新
 const backendAudioFeaturesHandler = (event: CustomEvent) => {
   const features = event.detail as AudioFeatures;
   
-  // 当播放后端音频时，更新 speaking 模式的强度
-  if (siriWaveMode.value === 'speaking' && isPlayingBackendAudio.value) {
-    currentSpeakingIntensity.value = 0.5 + features.volume * 0.5; // 0.5-1.0 范围
+  // 如果接收到后端音频特征，但isPlayingBackendAudio为false，强制更正
+  if (!isPlayingBackendAudio.value && features.volume > 0.01) {
+    console.log(`[修复] 检测到音频数据但播放状态未更新，强制更正状态`);
+    isPlayingBackendAudio.value = true;
+    
+    // 发送播放开始事件，确保状态同步
+    tauriApi.invoke('audio_playback_started').catch(error => {
+      console.error('通知音频播放开始失败:', error);
+    });
+  }
+
+  // 始终更新强度和音量，无论当前UI模式如何
+  if (features.volume > 0.01) {
+    console.log(`[音频特征] 音量=${features.volume.toFixed(3)}, 是否播放=${isPlayingBackendAudio.value}`);
+    
+    // 更新说话强度和音量显示 - 使用更大的映射系数使律动更明显
+    currentSpeakingIntensity.value = 0.2 + features.volume * 4.0;
+    currentAudioVolume.value = features.volume;
   }
 };
 
@@ -607,32 +673,51 @@ onUnmounted(() => {
 
 // --- 状态映射逻辑 ---
 // 监听状态机状态变化，更新 SiriWave 模式
-watch([currentStateMachineState, isPlayingBackendAudio], ([state, playingAudio]) => {
-  if (playingAudio) {
-    siriWaveMode.value = 'speaking';
-  } else if (state === 'Initial') {
+watch(currentStateMachineState, (state) => {
+  // 根据 `前后端状态转移.markdown` 的第三点规则进行映射
+  //   idle = 初始
+  //   listening = 说话中/等待中
+  //   speaking = 听音中
+  if (state === 'Initial') {
     siriWaveMode.value = 'idle';
-  } else if (state === 'Speaking') {
+  } else if (state === 'Speaking' || state === 'Waiting') {
     siriWaveMode.value = 'listening';
   } else if (state === 'Listening') {
     siriWaveMode.value = 'speaking';
-  } else if (state === 'Waiting') {
-    siriWaveMode.value = 'listening';
   }
 });
 
 // --- 音频分析功能 ---
-let audioAnalysisInterval: ReturnType<typeof setInterval> | null = null;
+// let audioAnalysisInterval: ReturnType<typeof setInterval> | null = null;
 
 // 处理音频特征更新
-function handleAudioFeatures(features: AudioFeatures) {
+function handleAudioFeatures(features: AudioFeatures, isFromBackend: boolean = false) {
+  // 添加诊断日志
+  if (features.volume > 0.01) {
+    console.log(
+      `[AudioPlayback] ${isFromBackend ? '后端' : '麦克风'}音频特征: ` +
+      `模式=${siriWaveMode.value}, 音量=${features.volume.toFixed(3)}, ` +
+      `静音=${features.isSilent}, 后端播放=${isPlayingBackendAudio.value}`
+    );
+  }
+
   // 根据当前模式更新强度
   if (siriWaveMode.value === 'listening') {
     // 监听模式：基于麦克风音量调整强度
-    currentListeningIntensity.value = 0.3 + features.volume * 0.7; // 0.3-1.0 范围
+    // 将音量的动态范围映射到更大的强度变化范围
+    // 使用更大基线值(0.2)和更大系数(3.5)
+    currentListeningIntensity.value = 0.2 + features.volume * 3.5;
+    currentAudioVolume.value = features.volume; // 更新当前音量
   } else if (siriWaveMode.value === 'speaking') {
     // 说话模式：基于播放音频音量调整强度
-    currentSpeakingIntensity.value = 0.5 + features.volume * 0.5; // 0.5-1.0 范围
+    // 同样，为说话模式提供更大的动态范围
+    // 如果是来自后端的特征，确保它能反映在UI上
+    if (isFromBackend || isPlayingBackendAudio.value) {
+      // 使用非线性映射，让低音量时也有明显变化
+      const amplifiedVolume = Math.pow(features.volume, 0.7) * 4.0 + 0.3;
+      currentSpeakingIntensity.value = Math.min(amplifiedVolume, 3.0); // 限制最大值
+      currentAudioVolume.value = features.volume; // 更新当前音量
+    }
   }
 }
 
@@ -1083,6 +1168,39 @@ async function startAudioAnalysisWithCustomStream(stream: MediaStream) {
     console.error('启动模拟麦克风音频分析失败:', error);
   }
 }
+
+// 模拟STT结果
+function simulateSttResult() {
+  console.log('[AudioPlayback] 模拟STT结果');
+  
+  // 创建一个模拟的STT结果事件
+  const mockResult = {
+    text: `这是一个模拟的语音识别结果 [${new Date().toLocaleTimeString()}]`,
+    is_final: Math.random() > 0.5 // 随机决定是否为最终结果
+  };
+  
+  // 创建自定义事件
+  const mockEvent = new CustomEvent('stt-result', {
+    detail: mockResult
+  });
+  
+  // 手动触发事件处理函数
+  handleSttResult(mockEvent);
+  
+  // 如果是最终结果，5秒后再模拟一个新结果
+  if (mockResult.is_final) {
+    setTimeout(() => {
+      const followupResult = {
+        text: `这是后续的模拟结果 [${new Date().toLocaleTimeString()}]`,
+        is_final: true
+      };
+      
+      handleSttResult(new CustomEvent('stt-result', {
+        detail: followupResult
+      }));
+    }, 5000);
+  }
+}
 </script>
 
 <style scoped>
@@ -1092,19 +1210,111 @@ async function startAudioAnalysisWithCustomStream(stream: MediaStream) {
   align-items: center;
   gap: 15px;
   width: 100%;
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
   padding: 20px;
 }
 
-.siri-wave-container {
+/* 主内容行布局 - 新增 */
+.main-content-row {
+  display: flex;
   width: 100%;
-  height: 200px;
+  gap: 20px;
   margin-bottom: 20px;
+}
+
+/* 音频播放状态指示器样式 */
+.audio-playback-status {
+  width: 100%;
+  padding: 10px 15px;
+  background-color: #f0f0f0;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  margin-bottom: 10px;
+  transition: all 0.3s ease;
+}
+
+.audio-playback-status.active {
+  background-color: #4caf50;
+  color: white;
+  animation: pulse-green 2s infinite;
+}
+
+.audio-playback-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ccc;
+}
+
+.audio-playback-status.active .audio-playback-indicator {
+  background-color: #fff;
+  box-shadow: 0 0 10px rgba(255,255,255,0.8);
+}
+
+@keyframes pulse-green {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+}
+
+.siri-wave-container {
+  width: 50%;
+  height: 200px;
   background: rgba(0, 0, 0, 0.05);
   border-radius: 15px;
   overflow: hidden;
   position: relative;
+}
+
+/* 语音识别结果容器 - 新增 */
+.stt-results-container {
+  width: 50%;
+  height: 200px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 15px;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stt-results-container h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.stt-text {
+  flex-grow: 1;
+  padding: 10px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow-y: auto;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.stt-text.final {
+  background-color: #e8f5e9;
+  font-weight: 500;
+}
+
+/* 调试信息区域 - 新增 */
+.debug-stt-info {
+  font-size: 12px;
+  color: #666;
+  background-color: rgba(255, 255, 255, 0.5);
+  padding: 5px 10px;
+  border-radius: 5px;
+}
+
+.debug-stt-info p {
+  margin: 3px 0;
 }
 
 .controls {
@@ -1142,6 +1352,14 @@ button.reset-button {
 
 button.reset-button:hover {
   background-color: #f57c00;
+}
+
+button.debug-button {
+  background-color: #9c27b0; /* 紫色 */
+}
+
+button.debug-button:hover {
+  background-color: #7b1fa2;
 }
 
 button:disabled {
@@ -1219,13 +1437,6 @@ button:disabled {
   background-color: #fff;
   border-radius: 8px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-.stt-text {
-  min-height: 50px;
-  padding: 10px;
-  background-color: #f5f5f5;
-  border-radius: 4px;
 }
 
 .history-list {
@@ -1341,5 +1552,64 @@ button:disabled {
 
 .sim-mic-actions button.recording:hover {
   background-color: #f57c00;
+}
+
+.audio-status-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.status-label {
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+.status-value {
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.volume-meter {
+  width: 100px;
+  height: 10px;
+  background-color: #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.volume-bar {
+  height: 100%;
+  background-color: #4caf50;
+}
+
+.volume-text {
+  font-size: 12px;
+  color: #666;
+}
+
+.siri-idle {
+  background-color: #607d8b;
+  color: white;
+}
+
+.siri-listening {
+  background-color: #2196f3;
+  color: white;
+}
+
+.siri-speaking {
+  background-color: #4caf50;
+  color: white;
 }
 </style> 

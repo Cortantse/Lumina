@@ -12,6 +12,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2",
+    "@tresjs/cientos": "^4.3.1",
     "@tresjs/core": "^4.3.6",
     "@types/three": "^0.177.0",
     "postprocessing": "^6.37.3",

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import nls
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
-from app.core.config import config
+import app.core.config as config
 from app.protocols.stt import STTClient, AudioData, STTResponse
 
 
@@ -282,17 +282,8 @@ class AliCloudSTTAdapter(STTClient):
             # print(f"【调试】发送音频数据，大小: {len(audio_data.data)}字节")  # 这行会产生大量日志，可能影响性能
             self.transcriber.send_audio(audio_data.data)
             
-            # 只返回新增的文本内容，避免前端显示重复内容
-            response_text = self.current_text
-            if self.last_sent_text and not self.is_final and response_text.startswith(self.last_sent_text):
-                # 如果当前文本以上次发送的文本开头（且不是最终结果），只返回新增部分
-                response_text = response_text[len(self.last_sent_text):]
-            
-            # 如果是最终结果或者有新内容，更新last_sent_text
-            if self.is_final or response_text:
-                self.last_sent_text = self.current_text
-            
-            return STTResponse(text=response_text, is_final=self.is_final)
+            # 直接返回当前完整的识别文本，移除复杂的文本差异对比逻辑
+            return STTResponse(text=self.current_text, is_final=self.is_final)
         except Exception as e:
             print(f"【错误】发送音频数据时出错: {e}")
             # 如果是连接相关错误，尝试标记transcriber为None以便下次重新创建

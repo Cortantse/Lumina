@@ -74,22 +74,26 @@ class UnixSocketSTTHandler:
         
         # 等待两个Socket任务完成
         await asyncio.gather(receive_task, result_task)
+        print("【调试】UnixSocket服务器所有任务已启动并正在运行。")
     
     async def _create_audio_socket(self) -> None:
         """创建接收音频数据的Unix Socket"""
         try:
             # 创建Unix Domain Socket
+            print("【调试】[音频Socket] 正在创建...")
             server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
             # 绑定Socket到文件路径
+            print(f"【调试】[音频Socket] 正在绑定到 {self.socket_path}...")
             server_socket.bind(self.socket_path)
             
             # 开始监听连接
+            print("【调试】[音频Socket] 正在监听连接...")
             server_socket.listen(5)
             server_socket.setblocking(False)
             
-            print(f"【调试】音频接收Socket已启动: {self.socket_path}")
+            print(f"【重要】[音频Socket] 已成功启动并监听: {self.socket_path}")
             
             # 创建事件循环
             loop = asyncio.get_event_loop()
@@ -98,12 +102,13 @@ class UnixSocketSTTHandler:
             while self.running:
                 try:
                     # 非阻塞方式接受连接
+                    print("【调试】[音频Socket] 等待新的客户端连接...")
                     client, _ = await loop.sock_accept(server_socket)
                     client.setblocking(False)
                     client_id = f"client_{len(self.active_connections) + 1}"
                     self.active_connections[client_id] = client
                     
-                    print(f"【调试】接受新的音频连接: {client_id}")
+                    print(f"【重要】[音频Socket] 接受新的音频连接: {client_id}")
                     
                     # 为每个连接创建处理任务
                     asyncio.create_task(self._handle_audio_connection(client, client_id))
@@ -136,7 +141,7 @@ class UnixSocketSTTHandler:
                     # 读取4字节的长度头
                     length_bytes = await loop.sock_recv(client, 4)
                     if not length_bytes or len(length_bytes) < 4:
-                        print(f"【调试】客户端 {client_id} 连接已关闭或读取长度失败")
+                        # print(f"【调试】客户端 {client_id} 连接已关闭或读取长度失败")
                         break
                     
                     # 解析长度字段
@@ -206,7 +211,7 @@ class UnixSocketSTTHandler:
                 client.close()
             except Exception as e:
                 print(f"【错误】关闭客户端连接时出错: {e}")
-            print(f"【调试】客户端 {client_id} 连接已关闭")
+            # print(f"【调试】客户端 {client_id} 连接已关闭")
     
     async def _process_audio_chunk(self, audio_data: bytes, client_id: str, chunk_id: int) -> None:
         """处理单个音频块 - VAD驱动模式，保证顺序处理"""
@@ -246,7 +251,7 @@ class UnixSocketSTTHandler:
     
     async def _end_current_session(self, client_id: str) -> None:
         """结束当前STT会话"""
-        if self.session_active and self.current_session_id == client_id:
+        if self.session_active and (self.current_session_id == client_id or client_id == "unknown"):
             print(f"【重要】结束STT会话: {client_id}")
             try:
                 # 结束STT会话并获取最终结果
@@ -268,58 +273,57 @@ class UnixSocketSTTHandler:
                 print(f"【错误】结束STT会话时出错: {e}")
     
     async def _create_result_socket(self) -> None:
-        """创建发送识别结果的Unix Socket"""
+        """创建发送识别结果的Unix Socket（带健壮的重连逻辑）"""
+        server_socket = None
         try:
-            # 创建Unix Domain Socket
+            print("【调试】[结果Socket] 正在创建...")
             server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
-            # 绑定Socket到文件路径
+            print(f"【调试】[结果Socket] 正在绑定到 {self.result_socket_path}...")
             server_socket.bind(self.result_socket_path)
             
-            # 开始监听连接
+            print("【调试】[结果Socket] 正在监听连接...")
             server_socket.listen(1)
             server_socket.setblocking(False)
             
-            print(f"【调试】识别结果Socket已启动: {self.result_socket_path}")
+            print(f"【重要】[结果Socket] 已成功启动并监听: {self.result_socket_path}")
             
-            # 创建事件循环
             loop = asyncio.get_event_loop()
             
-            # 等待结果接收器连接
-            self.result_client = None
-            
-            while self.running and not self.result_client:
+            while self.running:
                 try:
-                    # 非阻塞方式接受连接
+                    print("【调试】[结果Socket] 等待STT结果接收器连接...")
                     client, _ = await loop.sock_accept(server_socket)
                     client.setblocking(False)
                     self.result_client = client
-                    print("【重要】STT结果接收器已连接")
+                    print("【重要】[结果Socket] STT结果接收器已连接。")
+
+                    # 循环等待，直到发送时检测到连接断开
+                    while self.running and self.result_client:
+                        await asyncio.sleep(1)
+                    
+                    print("【信息】[结果Socket] 连接已断开或重置，准备接受新连接。")
+
+                except asyncio.CancelledError:
+                    print("【信息】[结果Socket] 任务被取消")
+                    break
                 except Exception as e:
-                    print(f"【警告】等待识别结果接收器连接时出错: {e}")
-                    await asyncio.sleep(0.5)
-            
-            # 保持Socket开启，直到服务停止
-            while self.running:
-                await asyncio.sleep(1)
-                
+                    print(f"【警告】[结果Socket] 接受连接时出现错误: {e}")
+                    await asyncio.sleep(1)
+        
+        except asyncio.CancelledError:
+            print("【信息】[结果Socket] 创建任务被取消。")
         except Exception as e:
-            print(f"【错误】创建识别结果Socket失败: {e}")
+            print(f"【错误】创建识别结果Socket时发生致命错误: {e}")
         finally:
-            # 关闭服务器Socket
-            if 'server_socket' in locals():
+            if server_socket:
                 server_socket.close()
-            
-            # 关闭结果客户端Socket
             if self.result_client:
                 self.result_client.close()
                 self.result_client = None
-            
-            # 删除Socket文件
             if os.path.exists(self.result_socket_path):
                 os.remove(self.result_socket_path)
-                
             print("【调试】识别结果Socket已关闭")
     
     async def _send_result(self, response: STTResponse) -> None:
@@ -340,10 +344,20 @@ class UnixSocketSTTHandler:
             # 发送识别结果
             await loop.sock_sendall(self.result_client, result_json + b'\n')
             
-            print(f"【重要】已发送识别结果: '{response.text}' (最终: {response.is_final})")
+            # 添加详细日志，特别是中间识别结果
+            if not response.is_final:
+                print(f"【重要】已发送中间识别结果: '{response.text}'")
+            else:
+                print(f"【调试】已发送最终识别结果: '{response.text}'")
+        except (ConnectionResetError, BrokenPipeError):
+            print("【错误】发送识别结果失败，客户端已断开连接。")
+            if self.result_client:
+                self.result_client.close()
+            self.result_client = None
         except Exception as e:
             print(f"【错误】发送识别结果失败: {e}")
-            # 如果发送失败，可能是接收器断开连接，重置result_client
+            if self.result_client:
+                self.result_client.close()
             self.result_client = None
     
     async def stop(self) -> None:

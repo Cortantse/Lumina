@@ -475,31 +475,27 @@ onLoop(({ elapsed }: { elapsed: number }) => {
   } else if (targetMode === 'listening') {
     /**
      * 听语音状态参数：
-     * 基础强度 + 语音模拟驱动的动态变化
-     * 第一个系数：基础强度比例 (推荐 0.2 ~ 0.5)
-     * 第二个系数：语音驱动的变化幅度 (推荐 0.5 ~ 0.8)
-     * 当前设置：基础0.3，语音变化0.7
+     * 直接使用传入的listeningIntensity值，不再与模拟数据混合
+     * 这样可以直接反映实际麦克风输入的强度
      */
-    tI = props.listeningIntensity * (0.3 + sim * 0.8);
+    tI = props.listeningIntensity;
     /**
-     * 缩放变化幅度 (推荐 0.03 ~ 0.08)
-     * 当前设置：基础1.0，语音变化0.05
+     * 缩放变化幅度
+     * 基于传入的强度值计算适当的缩放
      */
-    tS = STATE_BASE_SCALES.listening + sim * 0.1;
+    tS = STATE_BASE_SCALES.listening + (props.listeningIntensity - props.idleIntensity) * 0.2;
   } else if (targetMode === 'speaking') {
     /**
      * 说话状态参数：
-     * 更强的基础强度 + 语音模拟驱动的动态变化
-     * 第一个系数：基础强度比例 (推荐 0.4 ~ 0.7)
-     * 第二个系数：语音驱动的变化幅度 (推荐 0.3 ~ 0.6)
-     * 当前设置：基础0.5，语音变化0.5
+     * 直接使用传入的speakingIntensity值，不再与模拟数据混合
+     * 这样可以直接反映实际音频播放的强度
      */
-    tI = props.speakingIntensity * (0.5 + sim * 0.5);
+    tI = props.speakingIntensity;
     /**
-     * 缩放变化幅度 (推荐 0.03 ~ 0.08)
-     * 当前设置：基础1.15，语音变化0.05
+     * 缩放变化幅度
+     * 基于传入的强度值计算适当的缩放
      */
-    tS = STATE_BASE_SCALES.speaking + sim * 0.05;
+    tS = STATE_BASE_SCALES.speaking + (props.speakingIntensity - props.idleIntensity) * 0.1;
   }
 
   /**

@@ -5,6 +5,10 @@ from typing import Dict
 
 # 不要动，必须在这一步解密api_keys.json中的密钥到环境变量中
 import app.utils.decrypt as decrypt # type: ignore
+import app.utils.entity
+import app.utils.api_checker
+# 上面三个不要动
+
 
 from dotenv import load_dotenv
 import uvicorn
@@ -16,6 +20,7 @@ from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
+from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
 
 # 加载环境变量
 load_dotenv()
@@ -69,6 +74,9 @@ async def startup_event():
     # 初始化API模块
     initialize_audio_api(pipeline_service)
     
+    # 初始化TTS Socket服务器
+    await initialize_tts_socket()
+    
     # 使用protocols/stt.py中的工厂函数初始化WebSocket处理器
     websocket_handler = create_websocket_handler(stt_client=pipeline_service.stt_client)
     
@@ -81,6 +89,8 @@ async def startup_event():
 async def shutdown_event():
     """关闭事件，停止全局服务"""
     global pipeline_service, socket_handler
+    
+    await stop_tts_socket()
     
     if pipeline_service:
         pipeline_service.stop()
