@@ -111,7 +111,7 @@ ALLOWED_VOICE_IDS = {
     "Cute Elf": "Cute_Elf",
     "Attractive Girl": "Attractive_Girl",
     "Serene Woman": "Serene_Woman",
-    # "DEFAULT_VOICE_ID": "moss_audio_3d7914ec-42ca-11f0-b24c-2e48b7cbf811"
+    "DEFAULT_VOICE_ID": "moss_audio_3d7914ec-42ca-11f0-b24c-2e48b7cbf811"
 }
 
 DEFAULT_VOICE_ID = "moss_audio_3d7914ec-42ca-11f0-b24c-2e48b7cbf811"

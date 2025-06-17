@@ -1,17 +1,15 @@
 # app/protocols/command.py 语义命令识别与执行模块接口
 
-from typing import Protocol, Dict, Any, Optional
+from typing import Protocol, Dict, Any, Optional, List
 from enum import Enum
 
 
 class CommandType(Enum):
     """命令类型枚举，表示不同种类的指令"""
-    CONTROL = "CONTROL"         # 控制类指令，如暂停、继续
-    MEMORY = "MEMORY"           # 记忆操作类指令，如查询、保存
-    TTS_CONFIG = "TTS_CONFIG"   # TTS配置类指令，如设置音色
-    MULTIMODAL = "MULTIMODAL"   # 多模态触发类指令，如图像识别
-    PREFERENCE = "PREFERENCE"   # 偏好设置类指令，如输出风格
-    NONE = "NONE"               # 非命令
+    MEMORY_MULTI = "MEMORY_MULTI"   # 记忆操作和多模态触发类指令，如查询记忆、图像分析
+    TTS_CONFIG = "TTS_CONFIG"       # TTS配置类指令，如设置音色
+    PREFERENCE = "PREFERENCE"       # 偏好设置类指令，如输出风格
+    NONE = "NONE"                   # 非命令
 
 
 class CommandResult(Protocol):
@@ -57,13 +55,9 @@ class CommandDetector(Protocol):
         """设置偏好设置管理器"""
         ...
     
-    def set_session_manager(self, session_manager: Any) -> None:
-        """设置会话管理器"""
-        ...
-    
-    def detect_command(self, text: str) -> CommandResult:
+    async def detect_command(self, text: str) -> CommandResult:
         """
-        检测文本中是否包含命令
+        异步检测文本中是否包含命令
         
         Args:
             text: 输入文本
@@ -73,9 +67,21 @@ class CommandDetector(Protocol):
         """
         ...
     
-    def execute_command(self, command_result: CommandResult) -> Dict[str, Any]:
+    async def detect_command_with_tools(self, text: str) -> Optional[CommandResult]:
         """
-        执行检测到的命令
+        使用工具调用进行详细的命令检测
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            命令结果对象或None
+        """
+        ...
+    
+    async def execute_command(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        异步执行检测到的命令
         
         Args:
             command_result: 命令结果对象
@@ -85,7 +91,31 @@ class CommandDetector(Protocol):
         """
         ...
     
-    def process(self, text: str) -> Dict[str, Any]:
+    async def _execute_composite_command(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        执行复合命令
+        
+        Args:
+            command_result: 复合命令结果
+            
+        Returns:
+            执行结果
+        """
+        ...
+    
+    async def _execute_multiple_tts_operations(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        执行TTS多操作命令
+        
+        Args:
+            command_result: TTS多操作命令结果
+            
+        Returns:
+            执行结果
+        """
+        ...
+    
+    async def process(self, text: str) -> Dict[str, Any]:
         """
         处理输入文本，检测并执行命令
         
@@ -98,31 +128,23 @@ class CommandDetector(Protocol):
         ...
 
 
-class ControlHandler(Protocol):
-    """控制命令处理器协议"""
-    
-    def set_tts_client(self, tts_client: Any) -> None:
-        """设置TTS客户端"""
-        ...
-    
-    def set_session_manager(self, session_manager: Any) -> None:
-        """设置会话管理器"""
-        ...
-    
-    def handle(self, command_result: CommandResult) -> Dict[str, Any]:
-        """处理控制命令"""
-        ...
-
-
-class MemoryHandler(Protocol):
-    """记忆操作命令处理器协议"""
+class MemoryMultiHandler(Protocol):
+    """记忆操作和多模态命令处理器协议，合并了原来的记忆操作和多模态处理功能"""
     
     def set_memory_client(self, memory_client: Any) -> None:
         """设置记忆客户端"""
         ...
+        
+    def set_vision_client(self, vision_client: Any) -> None:
+        """设置视觉处理客户端"""
+        ...
+    
+    def set_audio_client(self, audio_client: Any) -> None:
+        """设置音频处理客户端"""
+        ...
     
     def handle(self, command_result: CommandResult) -> Dict[str, Any]:
-        """处理记忆操作命令"""
+        """处理记忆操作和多模态命令"""
         ...
 
 
@@ -136,21 +158,21 @@ class TTSConfigHandler(Protocol):
     def handle(self, command_result: CommandResult) -> Dict[str, Any]:
         """处理TTS配置命令"""
         ...
-
-
-class MultimodalHandler(Protocol):
-    """多模态命令处理器协议"""
     
-    def set_vision_client(self, vision_client: Any) -> None:
-        """设置视觉处理客户端"""
+    def handle_set_voice(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理设置音色的命令"""
         ...
     
-    def set_audio_client(self, audio_client: Any) -> None:
-        """设置音频处理客户端"""
+    def handle_set_style(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理设置语气风格的命令"""
         ...
     
-    def handle(self, command_result: CommandResult) -> Dict[str, Any]:
-        """处理多模态命令"""
+    def handle_set_speed(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理设置语速的命令"""
+        ...
+    
+    def handle_multiple_settings(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理多个TTS设置操作"""
         ...
 
 
@@ -166,20 +188,13 @@ class PreferenceHandler(Protocol):
         ...
 
 
-# 定义动作枚举类型的接口
-class ControlAction(Enum):
-    """控制类动作枚举"""
-    PAUSE_TTS = "pause_tts"           # 暂停语音合成
-    RESUME_TTS = "resume_tts"         # 继续语音合成
-    REPLAY_TTS = "replay_tts"         # 重播语音
-    EXIT_SESSION = "exit_session"     # 退出会话
-
-
 class MemoryAction(Enum):
     """记忆类动作枚举"""
     QUERY_MEMORY = "query_memory"     # 查询记忆
     DELETE_MEMORY = "delete_memory"   # 删除记忆
     SAVE_MEMORY = "save_memory"       # 保存记忆
+    TRIGGER_VISION = "trigger_vision" # 触发视觉模型
+    TRIGGER_AUDIO = "trigger_audio"   # 触发音频模型
 
 
 class TTSConfigAction(Enum):
@@ -187,15 +202,9 @@ class TTSConfigAction(Enum):
     SET_VOICE = "set_voice"           # 设置音色
     SET_STYLE = "set_style"           # 设置语气风格
     SET_SPEED = "set_speed"           # 设置语速
-
-
-class MultimodalAction(Enum):
-    """多模态类动作枚举"""
-    TRIGGER_VISION = "trigger_vision"   # 触发视觉模型
-    TRIGGER_AUDIO = "trigger_audio"     # 触发音频模型
+    SET_MULTIPLE = "set_multiple"     # 多个TTS设置操作
 
 
 class PreferenceAction(Enum):
     """偏好设置类动作枚举"""
-    SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格
-    SET_LANGUAGE = "set_language"               # 设置语言 
+    SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格 

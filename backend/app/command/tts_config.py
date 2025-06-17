@@ -4,7 +4,7 @@ import logging
 from typing import Dict, Any, Optional, Callable, List
 
 from .schema import CommandResult, TTSConfigAction
-from app.protocols.tts import ALLOWED_VOICE_IDS, DEFAULT_VOICE_ID
+from ..protocols.tts import ALLOWED_VOICE_IDS, DEFAULT_VOICE_ID
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -26,7 +26,8 @@ class TTSConfigHandler:
         self.action_handlers = {
             TTSConfigAction.SET_VOICE.value: self.handle_set_voice,
             TTSConfigAction.SET_STYLE.value: self.handle_set_style,
-            TTSConfigAction.SET_SPEED.value: self.handle_set_speed
+            TTSConfigAction.SET_SPEED.value: self.handle_set_speed,
+            "set_multiple": self.handle_multiple_settings  # 添加多操作处理器
         }
     
     def set_tts_client(self, tts_client):
@@ -299,6 +300,66 @@ class TTSConfigHandler:
             logger.error(f"Error in set_speed: {str(e)}")
             return {"success": False, "message": f"设置语速失败: {str(e)}"}
     
+    def handle_multiple_settings(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理多个TTS设置操作
+        
+        Args:
+            params: 命令参数，包含operations列表，每个操作包含action和params
+            
+        Returns:
+            处理结果
+        """
+        try:
+            if not self.tts_client:
+                logger.warning("TTS client not available for multiple settings")
+                return {"success": False, "message": "TTS客户端未设置，无法执行多项设置"}
+            
+            operations = params.get("operations", [])
+            if not operations:
+                return {"success": False, "message": "没有提供操作列表"}
+            
+            results = []
+            all_success = True
+            
+            for op in operations:
+                action = op.get("action")
+                op_params = op.get("params", {})
+                
+                # 查找对应的处理函数
+                handler = self.action_handlers.get(action)
+                if handler and handler != self.handle_multiple_settings:  # 避免递归调用
+                    result = handler(op_params)
+                    results.append({
+                        "action": action,
+                        "result": result
+                    })
+                    
+                    # 如果任何一个操作失败，标记整体失败
+                    if not result.get("success", False):
+                        all_success = False
+                else:
+                    logger.warning(f"Unknown TTS config action in multiple settings: {action}")
+                    results.append({
+                        "action": action,
+                        "result": {"success": False, "message": f"未知的TTS配置命令: {action}"}
+                    })
+                    all_success = False
+            
+            # 生成综合消息
+            success_count = sum(1 for r in results if r["result"].get("success", False))
+            message = f"完成了{success_count}/{len(operations)}项设置"
+            
+            return {
+                "success": all_success,
+                "message": message,
+                "results": results
+            }
+                
+        except Exception as e:
+            logger.error(f"Error in multiple TTS settings: {str(e)}")
+            return {"success": False, "message": f"多项TTS设置失败: {str(e)}"}
+
     def _select_voice_id(self, gender=None, age=None) -> Optional[str]:
         """
         根据性别和年龄选择合适的语音ID

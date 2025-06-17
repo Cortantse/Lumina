@@ -2,7 +2,7 @@ import re
 from typing import Dict, List, Tuple, Optional, Any
 from .schema import CommandType, CommandResult, ACTION_TYPE_MAPPING
 from .config import (
-    CONTROL_COMMANDS, 
+    # CONTROL_COMMANDS, 
     TTS_CONFIG_COMMANDS, 
     MEMORY_COMMANDS,
     MULTIMODAL_COMMANDS, 
@@ -66,17 +66,17 @@ class RuleBasedDetector:
         
     def _detect_control(self, text: str) -> Optional[CommandResult]:
         """检测控制类命令"""
-        for action, keywords in CONTROL_COMMANDS.items():
-            # 按关键词匹配
-            for keyword in keywords:
-                if keyword in text:
-                    # 根据匹配程度计算置信度
-                    confidence = self._calculate_confidence(text, keyword)
-                    return CommandResult(
-                        command_type=CommandType.CONTROL,
-                        action=action,
-                        confidence=confidence
-                    )
+        # for action, keywords in CONTROL_COMMANDS.items():
+        #     # 按关键词匹配
+        #     for keyword in keywords:
+        #         if keyword in text:
+        #             # 根据匹配程度计算置信度
+        #             confidence = self._calculate_confidence(text, keyword)
+        #             return CommandResult(
+        #                 command_type=CommandType.CONTROL,
+        #                 action=action,
+        #                 confidence=confidence
+        #             )
         return None
         
     def _detect_tts_config(self, text: str) -> Optional[CommandResult]:

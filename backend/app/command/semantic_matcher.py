@@ -13,7 +13,7 @@ import asyncio
 
 from .schema import CommandType, CommandResult
 from .config import (
-    CONTROL_COMMANDS, 
+    # CONTROL_COMMANDS, 
     TTS_CONFIG_COMMANDS, 
     MEMORY_COMMANDS,
     MULTIMODAL_COMMANDS, 
@@ -63,9 +63,9 @@ class SemanticMatcher:
         all_keywords = {}
         
         # 控制命令
-        for action, keywords in CONTROL_COMMANDS.items():
-            for keyword in keywords:
-                all_keywords[(CommandType.CONTROL, action, keyword)] = keyword
+        # for action, keywords in CONTROL_COMMANDS.items():
+        #     for keyword in keywords:
+        #         all_keywords[(CommandType.CONTROL, action, keyword)] = keyword
         
         # TTS配置命令
         for action, config in TTS_CONFIG_COMMANDS.items():

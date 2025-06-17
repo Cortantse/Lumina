@@ -5,16 +5,13 @@ from .schema import (
     ControlAction,
     MemoryAction, 
     TTSConfigAction, 
-    MultimodalAction, 
     PreferenceAction
 )
 
-from .control import ControlHandler
-from .memory_ops import MemoryHandler
+from .memory_multi import MemoryMultiHandler
 from .tts_config import TTSConfigHandler
-from .multimodal import MultimodalHandler
 from .preference import PreferenceHandler
-from .semantic_matcher import SemanticMatcher
+from .global_analyzer import GlobalCommandAnalyzer
 
 __all__ = [
     'CommandDetector',
@@ -23,12 +20,9 @@ __all__ = [
     'ControlAction',
     'MemoryAction',
     'TTSConfigAction',
-    'MultimodalAction',
     'PreferenceAction',
-    'ControlHandler',
-    'MemoryHandler',
+    'MemoryMultiHandler',
     'TTSConfigHandler',
-    'MultimodalHandler',
     'PreferenceHandler',
-    'SemanticMatcher',
+    'GlobalCommandAnalyzer',
 ]

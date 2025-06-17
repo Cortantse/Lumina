@@ -21,8 +21,7 @@ class PreferenceHandler:
         
         # 动作处理函数映射
         self.action_handlers = {
-            PreferenceAction.SET_RESPONSE_STYLE.value: self.handle_set_response_style,
-            PreferenceAction.SET_LANGUAGE.value: self.handle_set_language
+            PreferenceAction.SET_RESPONSE_STYLE.value: self.handle_set_response_style
         }
     
     def set_preference_manager(self, preference_manager):
@@ -86,42 +85,6 @@ class PreferenceHandler:
             logger.error(f"Error in set_response_style: {str(e)}")
             return {"success": False, "message": f"设置回复风格失败: {str(e)}"}
     
-    def handle_set_language(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        处理设置语言的命令
-        
-        Args:
-            params: 命令参数，可能包含language属性
-            
-        Returns:
-            处理结果
-        """
-        try:
-            if not self.preference_manager:
-                logger.warning("Preference manager not available for set_language action")
-                return {"success": False, "message": "偏好设置管理器未设置，无法执行语言设置"}
-            
-            # 提取语言参数
-            language = params.get("language")
-            if not language:
-                return {"success": False, "message": "未提供语言参数"}
-            
-            # 应用语言设置
-            self.preference_manager.set_language(language)
-            
-            # 获取语言名称
-            language_name = self._get_language_name(language)
-            
-            return {
-                "success": True,
-                "message": f"已设置回复语言为: {language_name}",
-                "language": language
-            }
-                
-        except Exception as e:
-            logger.error(f"Error in set_language: {str(e)}")
-            return {"success": False, "message": f"设置语言失败: {str(e)}"}
-    
     def _get_style_description(self, style: str) -> str:
         """
         获取风格的描述文本
@@ -142,26 +105,3 @@ class PreferenceHandler:
         }
         
         return style_descriptions.get(style, style)
-    
-    def _get_language_name(self, language_code: str) -> str:
-        """
-        获取语言代码对应的语言名称
-        
-        Args:
-            language_code: 语言代码
-            
-        Returns:
-            语言名称
-        """
-        language_names = {
-            "zh-CN": "中文",
-            "en-US": "英文",
-            "ja-JP": "日文",
-            "ko-KR": "韩文",
-            "fr-FR": "法文",
-            "de-DE": "德文",
-            "es-ES": "西班牙文",
-            "ru-RU": "俄文"
-        }
-        
-        return language_names.get(language_code, language_code)

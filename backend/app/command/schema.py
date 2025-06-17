@@ -4,12 +4,10 @@ from typing import Dict, Any, Optional
 
 class CommandType(Enum):
     """命令类型枚举，表示不同种类的指令"""
-    CONTROL = auto()       # 控制类指令，如暂停、继续
-    MEMORY = auto()        # 记忆操作类指令，如查询、保存
-    TTS_CONFIG = auto()    # TTS配置类指令，如设置音色
-    MULTIMODAL = auto()    # 多模态触发类指令，如图像识别
-    PREFERENCE = auto()    # 偏好设置类指令，如输出风格
-    NONE = auto()          # 非命令
+    MEMORY_MULTI = auto()    # 记忆操作和多模态触发类指令，如查询记忆、图像分析
+    TTS_CONFIG = auto()      # TTS配置类指令，如设置音色
+    PREFERENCE = auto()      # 偏好设置类指令，如输出风格
+    NONE = auto()            # 非命令
 
 
 class ControlAction(Enum):
@@ -25,6 +23,8 @@ class MemoryAction(Enum):
     QUERY_MEMORY = "query_memory"     # 查询记忆
     DELETE_MEMORY = "delete_memory"   # 删除记忆
     SAVE_MEMORY = "save_memory"       # 保存记忆
+    TRIGGER_VISION = "trigger_vision" # 触发视觉模型
+    TRIGGER_AUDIO = "trigger_audio"   # 触发音频模型
 
 
 class TTSConfigAction(Enum):
@@ -34,16 +34,9 @@ class TTSConfigAction(Enum):
     SET_SPEED = "set_speed"           # 设置语速
 
 
-class MultimodalAction(Enum):
-    """多模态类动作枚举"""
-    TRIGGER_VISION = "trigger_vision"   # 触发视觉模型
-    TRIGGER_AUDIO = "trigger_audio"     # 触发音频模型
-
-
 class PreferenceAction(Enum):
     """偏好设置类动作枚举"""
     SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格
-    SET_LANGUAGE = "set_language"               # 设置语言
 
 
 class CommandResult:
@@ -80,27 +73,18 @@ class CommandResult:
 
 # 动作类型映射，用于查找动作所属的命令类型
 ACTION_TYPE_MAPPING = {
-    # 控制类
-    ControlAction.PAUSE_TTS.value: CommandType.CONTROL,
-    ControlAction.RESUME_TTS.value: CommandType.CONTROL,
-    ControlAction.REPLAY_TTS.value: CommandType.CONTROL,
-    ControlAction.EXIT_SESSION.value: CommandType.CONTROL,
-    
-    # 记忆类
-    MemoryAction.QUERY_MEMORY.value: CommandType.MEMORY,
-    MemoryAction.DELETE_MEMORY.value: CommandType.MEMORY,
-    MemoryAction.SAVE_MEMORY.value: CommandType.MEMORY,
+    # 记忆和多模态类
+    MemoryAction.QUERY_MEMORY.value: CommandType.MEMORY_MULTI,
+    MemoryAction.DELETE_MEMORY.value: CommandType.MEMORY_MULTI,
+    MemoryAction.SAVE_MEMORY.value: CommandType.MEMORY_MULTI,
+    MemoryAction.TRIGGER_VISION.value: CommandType.MEMORY_MULTI,
+    MemoryAction.TRIGGER_AUDIO.value: CommandType.MEMORY_MULTI,
     
     # TTS配置类
     TTSConfigAction.SET_VOICE.value: CommandType.TTS_CONFIG,
     TTSConfigAction.SET_STYLE.value: CommandType.TTS_CONFIG,
     TTSConfigAction.SET_SPEED.value: CommandType.TTS_CONFIG,
     
-    # 多模态类
-    MultimodalAction.TRIGGER_VISION.value: CommandType.MULTIMODAL,
-    MultimodalAction.TRIGGER_AUDIO.value: CommandType.MULTIMODAL,
-    
     # 偏好设置类
     PreferenceAction.SET_RESPONSE_STYLE.value: CommandType.PREFERENCE,
-    PreferenceAction.SET_LANGUAGE.value: CommandType.PREFERENCE
 }

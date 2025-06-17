@@ -205,11 +205,17 @@ class PipelineService:
                         # print(f"【调试】合并后的文本: '{text}'")
                         
                         # 异步处理命令
-                        command_task = asyncio.create_task(self.command_detector.process(text))
+                        asyncio.create_task(self.command_detector.process(text))
+                        # command_task = asyncio.create_task(self.command_detector.process(text))
                         
                         # 清空缓冲区  
                         cleared_count = await self.stt_client.clear_sentence_buffer()
                         # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
+
+                        # 检查命令处理结果
+                        # command_result = await command_task
+                        # if command_result.get("is_command", False):
+                        #     print(f"执行命令: {command_result.get('message', '')}")
 
                         # 播放TTS
                         self.tts_playing = True
@@ -218,15 +224,6 @@ class PipelineService:
 
                         response_text = await simple_send_request_to_llm(text)
                         
-                        # 检查命令处理结果
-                        command_result = await command_task
-                        if command_result.get("is_command", False):
-                            print(f"执行命令: {command_result.get('message', '')}")
-                            
-                            # 如果是TTS配置类命令，可能影响后续TTS
-                            if command_result.get("command_info", {}).get("type") == "TTS_CONFIG":
-                                print(f"应用TTS配置: {command_result.get('message', '')}")
-
                         # 获取音频流并发送到前端
                         audio_stream = self.tts_client.send_tts_request(self.tts_emotion, response_text)
                         await send_tts_audio_stream(audio_stream)

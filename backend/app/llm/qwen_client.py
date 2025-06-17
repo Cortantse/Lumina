@@ -1,6 +1,10 @@
 # app/llm/qwen_client.py 千问大模型客户端
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from app.utils.request import send_request_async
+import logging
+
+# 设置日志
+logger = logging.getLogger(__name__)
 
 """
 async def send_request_async(messages: List[Dict[str, str]], model_name, max_retries=config.max_retries,
@@ -20,12 +24,42 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
 """
 _previous_messages = []
 
+# 全局命令分析器实例
+_global_analyzer = None
+
+def get_global_analyzer():
+    """
+    获取全局命令分析器实例（懒加载）
+    """
+    global _global_analyzer
+    if _global_analyzer is None:
+        from app.command.global_analyzer import GlobalCommandAnalyzer
+        _global_analyzer = GlobalCommandAnalyzer()
+    return _global_analyzer
+
 async def simple_send_request_to_llm(text: str):
     """
-    简单发送请求到LLM
+    简单发送请求到LLM，包含全局文本分析
     """
+    # 先进行全局文本分析
+    analyzer = get_global_analyzer()
+    analysis_result = await analyzer.analyze_text(text)
+    
+    # 记录分析结果
+    logger.info(f"全局文本分析结果: {analysis_result}")
+    
+        
+    
+    # 构建系统提示词，加入情绪分析结果
+    emotion = analysis_result.get("emotion", "中性")
+    key_content = analysis_result.get("key_content", "无")
+    system_prompt = f"你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，
+    请根据用户的问题给出简洁、快速但有情感的回答，注意回复能被转语音的内容，表情什么的不能。
+    用户当前情绪分析结果为：{emotion}，请据此调整你的回复语气和内容。用户当前关键内容为：{key_content}，请据此调整你的回复内容。
+    适当保持对用户输入文本的怀疑，因为输入文本为STT的结果，可能会有小问题"
+    
     messages = [
-        {"role": "system", "content": "你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，请根据用户的问题给出简洁、快速但有情感的回答，注意回复能被转语音的内容，表情什么的不能。"},
+        {"role": "system", "content": system_prompt},
     ]
     _previous_messages.append({"role": "user", "content": text})
     messages.extend(_previous_messages)
