@@ -20,10 +20,11 @@ Design considerations:
 
 """
 from __future__ import annotations
-import datetime as _dt
+import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, Any
+import uuid
 
 # ---------- 1. MemoryType Enum ---------- #
 class MemoryType(str, Enum):
@@ -52,23 +53,25 @@ class Memory:
     """
     original_text: str
     type: MemoryType
-    timestamp: _dt.datetime = field(default_factory=_dt.datetime.utcnow)
+    vector_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: dt.datetime = field(default_factory=dt.datetime.utcnow)
 
-    # Ranking & retrieval hints
-    vector_id: str = ""               # 对应向量存储的主键
-    indexes: List[Tuple[str, str]] = field(default_factory=list)   # 索引，方便更好检索，第一个元素是索引的原始文本，第二个元素是索引的向量 id 或 引用
-    # 如 [("用户生日", "vec-uuid"), ("姓名", "vec-uuid2"), ...]
+    # 用于父子文档策略的索引
+    indexes: List[Tuple[str, str]] = field(default_factory=list)
+    
+    # 附加元数据，如 is_parent, parent_id 等都存储在这里
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    blob_uri: Optional[str] = None
 
-    # Extensible payload
-    metadata: Dict[str, str] = field(default_factory=dict)
-    blob_uri: Optional[str] = None      # 指向大文件 (对象存储) 的 URI
+    # New fields for Parent-Child strategy
+    is_summary: bool = False
 
     # 可在 metadata 中添加: ttl, source, confidence_score, embedding_version, language 等
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         """将Memory对象序列化为字典，以便JSON存储。"""
         mem_dict = self.__dict__.copy()
-        if isinstance(mem_dict.get('timestamp'), _dt.datetime):
+        if isinstance(mem_dict.get('timestamp'), dt.datetime):
             mem_dict['timestamp'] = mem_dict['timestamp'].isoformat()
         if isinstance(mem_dict.get('type'), MemoryType):
             mem_dict['type'] = mem_dict['type'].value
@@ -107,7 +110,7 @@ class MemoryReader(Protocol):
         *,
         limit: int = 5,
         filter_type: Optional[MemoryType] = None,
-        time_range: Optional[Tuple[_dt.datetime, _dt.datetime]] = None,
+        time_range: Optional[Tuple[dt.datetime, dt.datetime]] = None,
     ) -> Sequence[Tuple[Memory, float]]:
         ...  # 可扩展返回同分值、相似度分数等
 

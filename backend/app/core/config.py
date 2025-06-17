@@ -20,3 +20,25 @@ long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush
 max_sentence_silence = 100 # 最大句子静默时间，单位：毫秒
 max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
 max_end_silence = 500 # 最大结束静默时间，单位：毫秒
+
+VECTORIZATION_CONFIG = {
+    "default_model": "openai",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "models": {
+        "openai": {
+            "type": "openai",
+            "api_key": "sk-BzT0mSR2XmnXdBRB2xUVIaRnxO93HEeX8bk7ydxIlTkVGy25",
+            "model_name": "text-embedding-3-large",
+            "base_url": "https://api.chatanywhere.tech/v1",
+            "dimensions": 3072,  # text-embedding-3-large 的维度
+            "batch_size": 32,
+            "timeout": 10.0
+        },
+        "bge-base-zh": {
+            "type": "sentence_transformer",
+            "model_name": "BAAI/bge-base-zh",
+            "device": "cuda", # 如果可用，使用 'cuda'，否则 'cpu'
+            "dimensions": 768, # BAAI/bge-base-zh 的维度
+            "batch_size": 128
+        }
+    }
+}
