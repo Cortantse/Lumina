@@ -127,7 +127,7 @@ class EmbeddingService:
         
         start_time = time.time()
         self._model = openai.AsyncOpenAI(
-            api_key=self.model_config['api_key'],
+            api_key = os.environ.get("openai_ed_key", None),
             base_url=self.model_config['base_url'],
             timeout=self.model_config.get('timeout', 10.0)
         )

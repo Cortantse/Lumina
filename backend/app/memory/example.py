@@ -22,12 +22,13 @@ import app.utils.decrypt
 import app.core.config as config
 
 from app.protocols.memory import MemoryType
-from app.memory.store import get_memory_manager, FAISSMemoryStore
+from app.memory.store import get_memory_manager
+from app.protocols.memory import MemoryManager
 
 # 存储用于测试的记忆ID
 stored_memory_ids = []
 
-async def clear_all_memories(memory_manager: FAISSMemoryStore) -> None:
+async def clear_all_memories(memory_manager: MemoryManager) -> None:
     """
     清除所有现有记忆。
     
@@ -83,7 +84,7 @@ async def _select_memory_type_interactive(prompt_message: str) -> Optional[Memor
     print("无效选择或已跳过。")
     return None
 
-async def store_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
+async def store_memory_interactive(memory_manager: MemoryManager) -> None:
     """
     交互式存储记忆。
     
@@ -144,7 +145,7 @@ async def store_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
     except Exception as e:
         print(f"存储记忆失败: {e}")
 
-async def query_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
+async def query_memory_interactive(memory_manager: MemoryManager) -> None:
     """
     交互式查询记忆。
     
@@ -208,7 +209,7 @@ async def query_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
     except Exception as e:
         print(f"查询记忆失败: {e}")
 
-async def delete_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
+async def delete_memory_interactive(memory_manager: MemoryManager) -> None:
     """
     交互式删除记忆。
     
@@ -239,7 +240,7 @@ async def delete_memory_interactive(memory_manager: FAISSMemoryStore) -> None:
     else:
         print("无效选择。操作取消。")
 
-async def _delete_single_chunk(memory_manager: FAISSMemoryStore):
+async def _delete_single_chunk(memory_manager: MemoryManager):
     """处理删除单个记忆块的逻辑"""
     print("\n--- 删除单个记忆块/总结 ---")
     memory_id = input("\n请输入要删除的记忆块的 Vector ID: ")
@@ -282,7 +283,7 @@ async def _delete_single_chunk(memory_manager: FAISSMemoryStore):
     except Exception as e:
         print(f"删除记忆失败: {e}")
 
-async def _delete_document(memory_manager: FAISSMemoryStore):
+async def _delete_document(memory_manager: MemoryManager):
     """处理删除整个文档的逻辑"""
     print("\n--- 删除整个父文档及其总结 ---")
     document_id = input("\n请输入要删除的父文档的 ID: ")

@@ -20,9 +20,10 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Any
 from dataclasses import dataclass
 from ..utils.exception import print_error, print_warning
 from ..protocols.memory import Memory, MemoryManager, MemoryType
+from ..core.config import TEXT_SPLITTER_CONFIG
 from .embeddings import get_embedding_service, EmbeddingService
 from .text_splitter import RecursiveCharacterTextSplitter
-from ..llm.qwen_client import generate_tags_for_text
+from .enhancer import generate_tags_for_text
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ class FAISSMemoryStore(MemoryManager):
         embedding_service: Optional[EmbeddingService] = None,
         persist_dir: Optional[str] = None,
         index_name: str = "memory_index",
-        chunk_size: int = 200,
-        chunk_overlap: int = 40,
+        chunk_size: int = TEXT_SPLITTER_CONFIG["chunk_size"],
+        chunk_overlap: int = TEXT_SPLITTER_CONFIG["chunk_overlap"],
     ):
         """
         Initialize the FAISS memory store.
@@ -56,8 +57,8 @@ class FAISSMemoryStore(MemoryManager):
             embedding_service: Service to convert text to vectors
             persist_dir: Directory to persist the index and metadata
             index_name: Name of the index
-            chunk_size: The maximum size of text chunks for splitting.
-            chunk_overlap: The overlap between consecutive chunks.
+            chunk_size: The maximum size of text chunks. Defaults to value in config.
+            chunk_overlap: The overlap between chunks. Defaults to value in config.
         """
         # Initialize embedding service
         self.embedding_service = embedding_service or get_embedding_service()
@@ -568,7 +569,7 @@ _default_memory_manager: Optional[FAISSMemoryStore] = None
 async def get_memory_manager(
     persist_dir: Optional[str] = None,
     embedding_model_key: Optional[str] = None,
-) -> FAISSMemoryStore:
+) -> MemoryManager:
     """
     获取或创建默认的记忆管理器实例。
     此函数现在是异步的，以处理异步初始化。
@@ -578,7 +579,7 @@ async def get_memory_manager(
         embedding_model_key: 要使用的嵌入模型的键 (来自config.py)
         
     Returns:
-        一个完全初始化的 FAISSMemoryStore 实例
+        一个完全初始化的 FAISSMemoryStore 实例，但类型注解为 MemoryManager 协议。
     """
     global _default_memory_manager
     
