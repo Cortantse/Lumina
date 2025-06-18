@@ -30,12 +30,11 @@ TEXT_SPLITTER_CONFIG = {
 }
 
 VECTORIZATION_CONFIG = {
-    "default_model": "openai",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "default_model": "bge-base-zh",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
     "models": {
         "openai": {
             "type": "openai",
-            "api_key": "8THiX2fmKT6OIzV5Z9uJzXAfSvffolHafCPPuHyVF42Vvdp95/K3zKeiW1A7R0yWl8+7oYU5UEzfrB21caeKbD/9X7KlQwZkfyn/qcBdsLE=",
-            "model_name": "text-embedding-3-large",
+           "model_name": "text-embedding-3-large",
             "base_url": "https://api.chatanywhere.tech/v1",
             "dimensions": 3072,  # text-embedding-3-large 的维度
             "batch_size": 32,
