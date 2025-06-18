@@ -7,7 +7,6 @@ import json
 from typing import List
 
 from ..utils.request import send_request_async
-from ..utils.exception import warning_print
 
 async def generate_tags_for_text(text: str) -> List[str]:
     """
@@ -50,11 +49,11 @@ async def generate_tags_for_text(text: str) -> List[str]:
             # print(f"【调试】[MemoryEnhancer] 为文本 '{text[:30]}...' 生成的标签: {tags}")
             return tags
         else:
-            warning_print(generate_tags_for_text, f"【调试】[MemoryEnhancer] LLM返回的标签格式不正确: {response}")
+            print(f"【调试】[MemoryEnhancer] LLM返回的标签格式不正确: {response}")
             return []
 
     except json.JSONDecodeError:
-        warning_print(generate_tags_for_text, f"【调试】[MemoryEnhancer] 无法解析LLM返回的JSON: {response}")
+        print(f"【调试】[MemoryEnhancer] 无法解析LLM返回的JSON: {response}")
         # Fallback to try and extract content directly from the raw response
         if "：" in response or ":" in response: # Compatible with Chinese and English colons
              parts = response.split(":", 1)[-1].split("：", 1)[-1]
@@ -63,5 +62,5 @@ async def generate_tags_for_text(text: str) -> List[str]:
                  return tags
         return []
     except Exception as e:
-        warning_print(generate_tags_for_text, f"【调试】[MemoryEnhancer] 生成标签时发生未知错误: {e}")
+        print(f"【调试】[MemoryEnhancer] 生成标签时发生未知错误: {e}")
         return [] 

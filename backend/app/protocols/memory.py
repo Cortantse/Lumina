@@ -119,6 +119,14 @@ class MemoryManager(MemoryWriter, MemoryReader, Protocol):
     Combined façade that bundles writer & reader behaviors.
     实现者可独立实现 read/write，也可组合外部服务。
     """
+    async def get(self, vector_id: str) -> Optional[Memory]:
+        """Retrieves a single memory object by its unique vector_id."""
+        ...
+
+    async def count(self) -> int:
+        """Returns the total number of memory chunks in the store."""
+        ...
+
     async def delete(self, vector_id: str) -> bool:
         """Deletes a single memory chunk by its unique vector_id."""
         ...

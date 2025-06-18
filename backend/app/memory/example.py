@@ -39,7 +39,7 @@ async def clear_all_memories(memory_manager: MemoryManager) -> None:
     start_time = time.time()
     
     # 获取当前记忆数量
-    count = len(memory_manager.memories)
+    count = await memory_manager.count()
     
     # 使用新的、高效的clear方法
     await memory_manager.clear()
@@ -219,8 +219,8 @@ async def delete_memory_interactive(memory_manager: MemoryManager) -> None:
     print("\n===== 删除记忆 =====")
     
     # 内存中的所有记忆对象，用于查找
-    memories = memory_manager.memories
-    if not memories:
+    total_memories = await memory_manager.count()
+    if total_memories == 0:
         print("记忆存储为空。")
         return
 
@@ -248,7 +248,7 @@ async def _delete_single_chunk(memory_manager: MemoryManager):
         print("ID 不能为空。")
         return
 
-    memory = memory_manager.memories.get(memory_id)
+    memory = await memory_manager.get(memory_id)
     if not memory:
         print(f"未找到 Vector ID 为 {memory_id} 的记忆。操作取消。")
         return
@@ -291,28 +291,22 @@ async def _delete_document(memory_manager: MemoryManager):
         print("ID 不能为空。")
         return
 
-    # 找到父文档及其所有子文档
-    chunks_to_delete = []
-    parent_mem = memory_manager.memories.get(document_id)
-    if parent_mem and parent_mem.metadata.get("is_parent") == "True":
-        chunks_to_delete.append(parent_mem)
-        # 寻找所有子文档
-        for mem in memory_manager.memories.values():
-            if mem.metadata.get("parent_id") == document_id:
-                chunks_to_delete.append(mem)
-
-    if not chunks_to_delete:
-        print(f"未找到 父文档ID 为 {document_id} 的记忆。操作取消。")
+    # 找到父文档，然后用其实现去找到子文档
+    parent_mem = await memory_manager.get(document_id)
+    
+    if not parent_mem or parent_mem.metadata.get("is_parent") != "True":
+        print(f"未找到 ID 为 {document_id} 的父文档。操作取消。")
         return
+        
+    # 注意：这里我们不再能直接遍历 memory_manager.memories 来找子节点
+    # 但删除逻辑本身在 store.py 的 delete_document 中已经处理了父子关系
+    # 所以我们在这里只做确认，而不需要手动收集子节点列表
+    print(f"\n将要删除 父文档ID '{document_id}' 及其所有关联的子文档。")
+    print("预览父文档内容:")
+    print(f"  内容: {parent_mem.original_text[:80]}...")
 
-    print(f"\n将要删除与 父文档ID '{document_id}' 关联的 {len(chunks_to_delete)} 个记忆块 (1个父, {len(chunks_to_delete)-1}个子):")
-    for i, mem in enumerate(chunks_to_delete[:5]): # 预览前5个
-        mem_type = "父" if mem.metadata.get("is_parent") == "True" else "子"
-        print(f"  {i+1}. [{mem_type}] {mem.original_text[:60]}...")
-    if len(chunks_to_delete) > 5:
-        print("  ...")
 
-    confirm = input("\n确认删除所有这些记忆块? (y/n): ").strip().lower() == 'y'
+    confirm = input("\n确认删除此文档及其所有子文档? (y/n): ").strip().lower() == 'y'
     if not confirm:
         print("删除操作已取消。")
         return
@@ -326,9 +320,9 @@ async def _delete_document(memory_manager: MemoryManager):
         if success:
             print(f"成功删除 {count} 个记忆块 (耗时: {elapsed:.4f}秒)")
             # 从 stored_memory_ids 中移除 (如果存在)
-            ids_to_remove_from_local_list = {mem.vector_id for mem in chunks_to_delete}
-            global stored_memory_ids
-            stored_memory_ids = [id for id in stored_memory_ids if id not in ids_to_remove_from_local_list]
+            # 由于不再能直接访问子节点，我们只移除父节点ID
+            if document_id in stored_memory_ids:
+                stored_memory_ids.remove(document_id)
         else:
             print("删除文档失败。")
     except Exception as e:

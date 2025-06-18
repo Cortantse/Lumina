@@ -25,8 +25,8 @@ max_end_silence = 500 # 最大结束静默时间，单位：毫秒
 # 这些参数控制着长文本在存入记忆前如何被分割成小块。
 # 合理的块大小和重叠能显著影响检索的准确率。
 TEXT_SPLITTER_CONFIG = {
-    "chunk_size": 10,      # 每个文本块的最大字符数。
-    "chunk_overlap": 5     # 相邻文本块之间的重叠字符数，以保持上下文的连续性。
+    "chunk_size": 100,      # 每个文本块的最大字符数。
+    "chunk_overlap": 20     # 相邻文本块之间的重叠字符数，以保持上下文的连续性。
 }
 
 VECTORIZATION_CONFIG = {

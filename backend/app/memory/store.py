@@ -382,6 +382,14 @@ class FAISSMemoryStore(MemoryManager):
         
         return sorted_parents[:limit]
         
+    async def get(self, vector_id: str) -> Optional[Memory]:
+        """Retrieve a single memory object by its unique vector_id."""
+        return self.memories.get(vector_id)
+
+    async def count(self) -> int:
+        """Return the total number of memory chunks in the store."""
+        return len(self.memories)
+        
     def optimize_index(self) -> None:
         """
         优化FAISS索引以加快搜索速度。
