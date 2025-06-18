@@ -101,9 +101,12 @@ lumina/
 │   │   │   ├── ocr.py                # OCR 服务 (placeholder)
 │   │   │   └── handler.py            # 多模态消息转发处理 (placeholder)
 │   │   │
-│   │   ├── memory/                   # 长短期记忆存储
-│   │   │   ├── store.py              # 向量存储实现 (placeholder)
-│   │   │   └── embeddings.py         # 文本向量化封装 (placeholder)
+│   │   ├── memory/                   # 长短期记忆存储与增强
+│   │   │   ├── __init__.py           # 模块接口暴露
+│   │   │   ├── store.py              # 基于FAISS的向量存储与检索实现(placeholder)
+│   │   │   ├── embeddings.py         # 文本向量化服务封装 (支持本地与OpenAI)(placeholder)
+│   │   │   ├── enhancer.py           # 记忆内容增强 (如LLM生成标签)
+│   │   │   └── text_splitter.py      # 递归文本分块工具
 │   │   │
 │   │   ├── retrieval/                # 记忆检索
 │   │   │   └── retriever.py          # 检索实现 (placeholder)
