@@ -1,5 +1,5 @@
 """
-High-level protocol definitions and design guidance for Lumina’s Memory subsystem.
+High-level protocol definitions and design guidance for Lumina's Memory subsystem.
 
 This file **only declares** interfaces and data structures (no implementations),
 and embeds key analysis, risks, and technical references as comments to guide
@@ -17,14 +17,14 @@ Design considerations:
   - Memory/Retriever 抽象: LangChain, LlamaIndex
   - Embedding: OpenAI Embedding, BGE-m3
   - Hybrid Search: dense+lexical (ColBERT, SPLADE)
-  - 范例衰减算法: score = priority - λ * Δt + novelty
 
 """
 from __future__ import annotations
-import datetime as _dt
+import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, Any
+import uuid
 
 # ---------- 1. MemoryType Enum ---------- #
 class MemoryType(str, Enum):
@@ -53,20 +53,29 @@ class Memory:
     """
     original_text: str
     type: MemoryType
-    timestamp: _dt.datetime = field(default_factory=_dt.datetime.utcnow)
+    vector_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: dt.datetime = field(default_factory=dt.datetime.utcnow)
 
-    # Ranking & retrieval hints
-    priority: int = 0                   # 手动或算法评估的重要度
-    decay_rate: float = 0.0             # 衰减系数 (随时间衰减)
-    vector_id: str = ""               # 对应向量存储的主键
-    indexes: List[Tuple[str, str]] = field(default_factory=list)   # 索引，方便更好检索，第一个元素是索引的原始文本，第二个元素是索引的向量 id 或 引用
-    # 如 [("用户生日", "vec-uuid"), ("姓名", "vec-uuid2"), ...]
+    # 用于父子文档策略的索引
+    indexes: List[Tuple[str, str]] = field(default_factory=list)
+    
+    # 附加元数据，如 is_parent, parent_id 等都存储在这里
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    blob_uri: Optional[str] = None
 
-    # Extensible payload
-    metadata: Dict[str, str] = field(default_factory=dict)
-    blob_uri: Optional[str] = None      # 指向大文件 (对象存储) 的 URI
+    # New fields for Parent-Child strategy
+    is_summary: bool = False
 
     # 可在 metadata 中添加: ttl, source, confidence_score, embedding_version, language 等
+
+    def to_dict(self) -> Dict[str, Any]:
+        """将Memory对象序列化为字典，以便JSON存储。"""
+        mem_dict = self.__dict__.copy()
+        if isinstance(mem_dict.get('timestamp'), dt.datetime):
+            mem_dict['timestamp'] = mem_dict['timestamp'].isoformat()
+        if isinstance(mem_dict.get('type'), MemoryType):
+            mem_dict['type'] = mem_dict['type'].value
+        return mem_dict
 
 # ---------- 3. Protocol Interfaces ---------- #
 class MemoryWriter(Protocol):
@@ -79,7 +88,6 @@ class MemoryWriter(Protocol):
         original_text: str,
         mem_type: MemoryType,
         *,
-        priority: int = 0,
         metadata: Optional[Mapping[str, str]] = None,
         blob_uri: Optional[str] = None,
     ) -> Memory:
@@ -90,10 +98,10 @@ class MemoryReader(Protocol):
     Read-side contract: retrieves memories given a query string.
 
     Retrieval should consider:
-      - Vector similarity + lexical rerank (BM25)
-      - Time decay & priority sorting
-      - Optional filtering by type / time range
-      - LLM-driven query rewriting for recall
+      - Vector similarity as the primary ranking factor.
+      - A secondary sorting mechanism (e.g., by timestamp) for highly relevant results.
+      - Optional filtering by type / time range.
+      - LLM-driven query rewriting for recall.
     """
 
     async def retrieve(
@@ -102,8 +110,8 @@ class MemoryReader(Protocol):
         *,
         limit: int = 5,
         filter_type: Optional[MemoryType] = None,
-        time_range: Optional[Tuple[_dt.datetime, _dt.datetime]] = None,
-    ) -> Sequence[Memory]:
+        time_range: Optional[Tuple[dt.datetime, dt.datetime]] = None,
+    ) -> Sequence[Tuple[Memory, float]]:
         ...  # 可扩展返回同分值、相似度分数等
 
 class MemoryManager(MemoryWriter, MemoryReader, Protocol):
@@ -111,15 +119,32 @@ class MemoryManager(MemoryWriter, MemoryReader, Protocol):
     Combined façade that bundles writer & reader behaviors.
     实现者可独立实现 read/write，也可组合外部服务。
     """
-    pass
+    async def get(self, vector_id: str) -> Optional[Memory]:
+        """Retrieves a single memory object by its unique vector_id."""
+        ...
+
+    async def count(self) -> int:
+        """Returns the total number of memory chunks in the store."""
+        ...
+
+    async def delete(self, vector_id: str) -> bool:
+        """Deletes a single memory chunk by its unique vector_id."""
+        ...
+
+    async def delete_document(self, document_id: str) -> Tuple[bool, int]:
+        """Deletes all memory chunks associated with a document_id."""
+        ...
+
+    async def clear(self) -> None:
+        """Clears all memories from the store."""
+        ...
 
 # ---------- 4. Implementation Notes & Risks ---------- #
 # 1. 可变默认参数: 避免 `indexes=[]`, 使用 default_factory=list.
 # 2. 时间一致性: 全部使用 UTC; 序列化存 ISO-8601.
 # 5. 检索算法: hybrid search (dense+lexical), 参考 ColBERT, SPLADE.
-# 7. 衰减 & 清理: 定期后台任务自动summarize/forget;
-#    score = priority - λ * Δt + novelty。
-# 9. 更新/删除: 提供 upsert() 和 delete() 接口;
+# 7. 衰减 & 清理: 定期后台任务自动summarize/forget.
+# 9. 更新/删除: `delete` 和 `delete_document` 接口已定义.
 # 10. Chunking 粒度: 基于句子/主题分块, metadata 标序号;
 # 12. 检索重写: LLM paraphrase query, 扩展 synonyms;
 # 13. 冷启动: 使用 seed profile 或初始系统 prompt 写入 memory;
@@ -161,9 +186,9 @@ class MemoryManager(MemoryWriter, MemoryReader, Protocol):
 #
 # 通过这种方式：
 # Lumina 可以更强大地实现以下高级功能：
-#   - “知识库”构建：快速加载与存储大型资料、手册、教程
-#   - “文档理解”：自动化提炼摘要、知识提取
-#   - “文档问答”：基于文档语义片段的精准问答交互（如：企业内部知识问答、技术文档咨询）
+#   - "知识库"构建：快速加载与存储大型资料、手册、教程
+#   - "文档理解"：自动化提炼摘要、知识提取
+#   - "文档问答"：基于文档语义片段的精准问答交互（如：企业内部知识问答、技术文档咨询）
 #
 # 推荐生态与工具：
 # - 文档加载器：LangChain document_loaders、LlamaIndex loaders

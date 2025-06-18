@@ -1,6 +1,7 @@
 # app/llm/qwen_client.py 千问大模型客户端
-from typing import Optional
+from typing import Optional, List
 from app.utils.request import send_request_async
+import json
 
 """
 async def send_request_async(messages: List[Dict[str, str]], model_name, max_retries=config.max_retries,
