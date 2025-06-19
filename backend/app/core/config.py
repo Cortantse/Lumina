@@ -20,3 +20,32 @@ long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush
 max_sentence_silence = 100 # 最大句子静默时间，单位：毫秒
 max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
 max_end_silence = 500 # 最大结束静默时间，单位：毫秒
+
+# 文本分块配置 (用于RAG中的父子文档策略)
+# 这些参数控制着长文本在存入记忆前如何被分割成小块。
+# 合理的块大小和重叠能显著影响检索的准确率。
+TEXT_SPLITTER_CONFIG = {
+    "chunk_size": 100,      # 每个文本块的最大字符数。
+    "chunk_overlap": 20     # 相邻文本块之间的重叠字符数，以保持上下文的连续性。
+}
+
+VECTORIZATION_CONFIG = {
+    "default_model": "bge-base-zh",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "models": {
+        "openai": {
+            "type": "openai",
+           "model_name": "text-embedding-3-large",
+            "base_url": "https://api.chatanywhere.tech/v1",
+            "dimensions": 3072,  # text-embedding-3-large 的维度
+            "batch_size": 32,
+            "timeout": 10.0
+        },
+        "bge-base-zh": {
+            "type": "sentence_transformer",
+            "model_name": "BAAI/bge-base-zh",
+            "device": "cuda", # 如果可用，使用 'cuda'，否则 'cpu'
+            "dimensions": 768, # BAAI/bge-base-zh 的维度
+            "batch_size": 128
+        }
+    }
+}

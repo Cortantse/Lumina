@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 from typing import List, Optional, Sequence, Any
+from ..core.config import TEXT_SPLITTER_CONFIG
 
 def _split_text_with_separators(
     text: str, separators: List[str], chunk_size: int
@@ -54,8 +55,8 @@ class RecursiveCharacterTextSplitter:
     
     def __init__(
         self,
-        chunk_size: int = 200,
-        chunk_overlap: int = 40,
+        chunk_size: int = TEXT_SPLITTER_CONFIG["chunk_size"],
+        chunk_overlap: int = TEXT_SPLITTER_CONFIG["chunk_overlap"],
         separators: Optional[List[str]] = None,
         keep_separator: bool = True,
     ):
@@ -63,8 +64,8 @@ class RecursiveCharacterTextSplitter:
         Initializes the text splitter.
         
         Args:
-            chunk_size: The maximum size of each chunk (in characters).
-            chunk_overlap: The number of characters to overlap between chunks.
+            chunk_size: Max size of each chunk. Defaults to value in config.
+            chunk_overlap: Overlap between chunks. Defaults to value in config.
             separators: A prioritized list of strings to split on.
             keep_separator: Whether to keep the separator in the chunks.
         """

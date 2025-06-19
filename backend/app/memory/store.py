@@ -20,8 +20,10 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Any
 from dataclasses import dataclass
 from ..utils.exception import print_error, print_warning
 from ..protocols.memory import Memory, MemoryManager, MemoryType
+from ..core.config import TEXT_SPLITTER_CONFIG
 from .embeddings import get_embedding_service, EmbeddingService
 from .text_splitter import RecursiveCharacterTextSplitter
+from .enhancer import generate_tags_for_text
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +47,8 @@ class FAISSMemoryStore(MemoryManager):
         embedding_service: Optional[EmbeddingService] = None,
         persist_dir: Optional[str] = None,
         index_name: str = "memory_index",
-        chunk_size: int = 200,
-        chunk_overlap: int = 40,
+        chunk_size: int = TEXT_SPLITTER_CONFIG["chunk_size"],
+        chunk_overlap: int = TEXT_SPLITTER_CONFIG["chunk_overlap"],
     ):
         """
         Initialize the FAISS memory store.
@@ -55,8 +57,8 @@ class FAISSMemoryStore(MemoryManager):
             embedding_service: Service to convert text to vectors
             persist_dir: Directory to persist the index and metadata
             index_name: Name of the index
-            chunk_size: The maximum size of text chunks for splitting.
-            chunk_overlap: The overlap between consecutive chunks.
+            chunk_size: The maximum size of text chunks. Defaults to value in config.
+            chunk_overlap: The overlap between chunks. Defaults to value in config.
         """
         # Initialize embedding service
         self.embedding_service = embedding_service or get_embedding_service()
@@ -75,10 +77,8 @@ class FAISSMemoryStore(MemoryManager):
         
         self.index_name = index_name
         
-        # Initialize FAISS indexes for vector search
-        # One for content, one for metadata
-        self.content_index = faiss.IndexFlatIP(self.vector_dim)
-        self.metadata_index = faiss.IndexFlatIP(self.vector_dim)
+        # Initialize FAISS index for vector search
+        self.index = faiss.IndexFlatIP(self.vector_dim)  # Inner product for cosine similarity
         
         # Dictionary to store memory objects by ID
         self.memories: Dict[str, Memory] = {}
@@ -90,17 +90,11 @@ class FAISSMemoryStore(MemoryManager):
         if self.persist_dir:
             await self._load_index()
 
-    def _get_content_index_path(self) -> str:
-        """Get the path for the content FAISS index file."""
+    def _get_index_path(self) -> str:
+        """Get the path for the FAISS index file."""
         if not self.persist_dir:
             raise ValueError("persist_dir not set")
-        return os.path.join(self.persist_dir, f"{self.index_name}_content.index")
-
-    def _get_metadata_index_path(self) -> str:
-        """Get the path for the metadata FAISS index file."""
-        if not self.persist_dir:
-            raise ValueError("persist_dir not set")
-        return os.path.join(self.persist_dir, f"{self.index_name}_metadata.index")
+        return os.path.join(self.persist_dir, f"{self.index_name}.index")
     
     def _get_metadata_path(self) -> str:
         """Get the path for the metadata JSON file."""
@@ -108,105 +102,71 @@ class FAISSMemoryStore(MemoryManager):
             raise ValueError("persist_dir not set")
         return os.path.join(self.persist_dir, f"{self.index_name}_meta.json")
     
-    def _metadata_to_text(self, memory: Memory) -> str:
-        """Converts memory metadata to a searchable text string."""
-        if not memory.metadata:
-            return ""
-        
-        # 简单地将键值对拼接成字符串
-        # 更好的实现可能会使用更复杂的模板或描述性语言
-        return ", ".join(f"{k} is {v}" for k, v in memory.metadata.items())
-
     async def _load_index(self) -> None:
         """Load the index and metadata from disk if they exist."""
-        content_index_path = self._get_content_index_path()
-        metadata_index_path = self._get_metadata_index_path()
+        index_path = self._get_index_path()
         metadata_path = self._get_metadata_path()
 
-        # 1. Load metadata (the source of truth for memories)
+        # Load metadata first
         memories_data = {}
         if os.path.exists(metadata_path):
             try:
                 with open(metadata_path, 'r', encoding='utf-8') as f:
-                    memories_data = json.load(f)
+                    memories_data_raw = json.load(f)
+                # Reconstruct Memory objects using from_dict
+                for mem_id, mem_raw in memories_data_raw.items():
+                    self.memories[mem_id] = Memory.from_dict(mem_raw)
             except Exception as e:
-                logger.error(f"Failed to load memory metadata: {e}")
+                logger.error(f"Failed to load and parse memory metadata: {e}")
 
-        # 2. Load FAISS indexes
-        content_index_compatible = False
-        if os.path.exists(content_index_path):
+        # Check if the index exists and is compatible
+        index_compatible = False
+        if os.path.exists(index_path):
             try:
-                existing_index = faiss.read_index(content_index_path)
+                existing_index = faiss.read_index(index_path)
+                # 检查维度是否匹配
                 if existing_index.d == self.vector_dim:
-                    self.content_index = existing_index
-                    content_index_compatible = True
+                    self.index = existing_index
+                    index_compatible = True
+                    logger.info(f"加载了与当前模型维度匹配的FAISS索引 ({self.vector_dim}维)")
                 else:
-                    print_warning(self._load_index, f"Content index dimension mismatch.")
+                    logger.info(f"检测到模型维度变化 (旧索引: {existing_index.d}维, 新模型: {self.vector_dim}维)。将自动重建索引以匹配新模型。")
             except Exception as e:
-                logger.error(f"Failed to load content FAISS index: {e}")
+                logger.error(f"加载FAISS索引失败: {e}")
         
-        metadata_index_compatible = False
-        if os.path.exists(metadata_index_path):
-            try:
-                existing_index = faiss.read_index(metadata_index_path)
-                if existing_index.d == self.vector_dim:
-                    self.metadata_index = existing_index
-                    metadata_index_compatible = True
-                else:
-                    print_warning(self._load_index, f"Metadata index dimension mismatch.")
-            except Exception as e:
-                logger.error(f"Failed to load metadata FAISS index: {e}")
-
-        # 3. Reconcile loaded data
-        if content_index_compatible and metadata_index_compatible and memories_data:
-            id_map_path = os.path.join(self.persist_dir, f"{self.index_name}_id_map.json")
-            if os.path.exists(id_map_path):
-                with open(id_map_path, 'r', encoding='utf-8') as f:
-                    stored_index_to_id = json.load(f)
-                
-                if len(stored_index_to_id) == self.content_index.ntotal:
-                    self.index_to_id = stored_index_to_id
-                    for mem_id in self.index_to_id:
-                        if mem_id in memories_data:
-                            mem_data = memories_data[mem_id]
-                            if 'timestamp' in mem_data and isinstance(mem_data['timestamp'], str):
-                                mem_data['timestamp'] = dt.datetime.fromisoformat(mem_data['timestamp'])
-                            self.memories[mem_id] = Memory(**mem_data)
-                    logger.info(f"Loaded {len(self.memories)} memories and reconciled with indexes.")
-                else:
-                    print_warning(self._load_index, "Indexes and ID map are inconsistent. Rebuilding.")
-                    await self._rebuild_from_mismatched_data(memories_data)
+        # Load index-to-id mapping
+        id_map_path = os.path.join(self.persist_dir, f"{self.index_name}_id_map.json")
+        if index_compatible and os.path.exists(id_map_path):
+            with open(id_map_path, 'r', encoding='utf-8') as f:
+                stored_index_to_id = json.load(f)
+            
+            if len(stored_index_to_id) == self.index.ntotal:
+                self.index_to_id = stored_index_to_id
+                # Filter out memories that are not in the index map
+                self.memories = {mid: self.memories[mid] for mid in self.index_to_id if mid in self.memories}
+                logger.info(f"Loaded {len(self.memories)} memories and {len(self.index_to_id)} index mappings.")
             else:
-                print_warning(self._load_index, "ID map not found. Rebuilding.")
-                await self._rebuild_from_mismatched_data(memories_data)
-        elif memories_data:
-            logger.info("Inconsistent data found (e.g., model dimension change). Rebuilding indexes.")
-            await self._rebuild_from_mismatched_data(memories_data)
-
-    async def _rebuild_from_mismatched_data(self, memories_data: Dict[str, Any]) -> None:
-        """Helper to rebuild indexes when loaded data is inconsistent."""
-        for mem_id, mem_data in memories_data.items():
-            if 'timestamp' in mem_data and isinstance(mem_data['timestamp'], str):
-                mem_data['timestamp'] = dt.datetime.fromisoformat(mem_data['timestamp'])
-            self.memories[mem_id] = Memory(**mem_data)
-        await self.rebuild_index(force_reembed=True)
-
+                print_warning(self._load_index, "FAISS index and ID map are inconsistent. Rebuilding...")
+                await self.rebuild_index(force_reembed=False)
+        elif self.memories:
+            logger.info("Index is missing, incompatible, or map is missing. Rebuilding from loaded metadata...")
+            # If metadata was loaded but index/map was not, rebuild.
+            await self.rebuild_index(force_reembed=not index_compatible)
+    
     def _save_index(self) -> None:
-        """Save the indexes and metadata to disk."""
+        """Save the index and metadata to disk."""
         if not self.persist_dir:
             return
         
-        content_index_path = self._get_content_index_path()
-        metadata_index_path = self._get_metadata_index_path()
+        index_path = self._get_index_path()
         metadata_path = self._get_metadata_path()
         
-        # Save FAISS indexes
+        # Save FAISS index
         try:
-            faiss.write_index(self.content_index, content_index_path)
-            faiss.write_index(self.metadata_index, metadata_index_path)
-            logger.info(f"Saved FAISS indexes to {self.persist_dir}")
+            faiss.write_index(self.index, index_path)
+            logger.info(f"Saved FAISS index to {index_path}")
         except Exception as e:
-            logger.error(f"Failed to save FAISS indexes: {e}")
+            logger.error(f"Failed to save FAISS index: {e}")
         
         # Save metadata
         try:
@@ -237,10 +197,10 @@ class FAISSMemoryStore(MemoryManager):
         blob_uri: Optional[str] = None,
     ) -> Memory:
         """
-        在索引中存储一条新记忆。文本将被自动分块。
-        
-        此方法现在将长文本分割成块，并为每个块创建和存储一个独立的记忆。
-        所有块都通过一个共同的 `document_id` 关联起来。
+        在索引中存储新记忆，采用父子文档策略。
+
+        此方法将长文本分割成父文档（原文块），然后为每个父文档生成
+        子文档（总结）。父文档和子文档都会被向量化并存储，通过ID关联。
         
         Args:
             original_text: 记忆的文本内容
@@ -249,71 +209,89 @@ class FAISSMemoryStore(MemoryManager):
             blob_uri: 关联二进制数据的 URI
             
         Returns:
-            代表第一个文本块的 Memory 对象。
+            代表第一个父文档块的 Memory 对象。
         """
-        # 使用文本分割器将文本分块
-        chunks = self.text_splitter.split_text(original_text)
-        if not chunks:
+        # 1. 将原始文本分割成父文档（原文块）
+        parent_chunks = self.text_splitter.split_text(original_text)
+        if not parent_chunks:
             print_warning(self.store, "文本分块后为空，不进行存储。")
-            # 根据协议，我们应该返回一个Memory对象，但这里没有可返回的。
-            # 这是一个边缘情况，可以考虑抛出异常或返回None（如果协议允许）。
-            # 为了简单起见，我们返回一个空的Memory对象或抛出异常。
             raise ValueError("Cannot store empty text after chunking.")
 
-        # 为这批相关的块生成一个共同的文档ID
-        document_id = str(uuid.uuid4())
+        all_texts_to_embed = []
+        all_memories_to_add: List[Memory] = []
         
-        # 为每个块创建 Memory 对象
-        new_memories: List[Memory] = []
-        for i, chunk in enumerate(chunks):
-            vector_id = str(uuid.uuid4())
-            chunk_metadata = dict(metadata or {})
-            chunk_metadata.update({
-                "document_id": document_id,
-                "chunk_sequence": str(i),
-                "total_chunks": str(len(chunks)),
-            })
-            memory = Memory(
-                original_text=chunk,
-                type=mem_type,
-                timestamp=dt.datetime.utcnow(),
-                vector_id=vector_id,
-                metadata=chunk_metadata,
-                blob_uri=blob_uri,
-            )
-            new_memories.append(memory)
+        # 2. 为每个父文档块处理父子关系
+        for parent_chunk in parent_chunks:
+            parent_id = str(uuid.uuid4())
             
-        # 准备批量嵌入
-        content_texts = [mem.original_text for mem in new_memories]
-        metadata_texts = [self._metadata_to_text(mem) for mem in new_memories]
-        
-        content_embeddings = await self.embedding_service.embed_text(content_texts)
-        metadata_embeddings = await self.embedding_service.embed_text(metadata_texts)
+            # b. 为父文档生成子文档（总结/标签）并创建其Memory对象
+            summaries = await generate_tags_for_text(parent_chunk)
+            child_memories: List[Memory] = []
+            child_indexes_for_parent: List[Tuple[str, str]] = []
 
-        # 将所有新向量批量添加到 FAISS 索引
+            for summary_text in summaries:
+                child_id = str(uuid.uuid4())
+                child_memories.append(Memory(
+                    original_text=summary_text,
+                    type=mem_type,
+                    timestamp=dt.datetime.utcnow(),
+                    vector_id=child_id,
+                    metadata={
+                        "is_parent": "False",
+                        "parent_id": parent_id,
+                        **(metadata or {})
+                    }
+                ))
+                child_indexes_for_parent.append((summary_text, child_id))
+
+            # a. 创建父文档的 Memory 对象，并回填子文档信息
+            parent_memory = Memory(
+                original_text=parent_chunk,
+                type=mem_type,
+                timestamp=child_memories[0].timestamp if child_memories else dt.datetime.utcnow(),
+                vector_id=parent_id,
+                indexes=child_indexes_for_parent, # 在这里回填子文档信息
+                metadata={
+                    "is_parent": "True",
+                    **(metadata or {})
+                }
+            )
+            
+            # c. 将父、子文档统一添加到待处理列表
+            all_memories_to_add.append(parent_memory)
+            all_texts_to_embed.append(parent_chunk)
+            all_memories_to_add.extend(child_memories)
+            all_texts_to_embed.extend([mem.original_text for mem in child_memories])
+
+        if not all_texts_to_embed:
+            print_warning(self.store, "没有可供向量化的文本。")
+            # This case is unlikely if parent_chunks is not empty, but as a fallback:
+            # We can't proceed if there is nothing to embed.
+            raise ValueError("No text available for embedding.")
+
+        # 3. 批量嵌入所有文本（父+子）
+        embeddings = await self.embedding_service.embed_text(all_texts_to_embed)
+
+        # 4. 将新数据批量添加到索引和元数据中
         try:
-            # Add to content index
-            self.content_index.add(content_embeddings.astype(np.float32))
-            # Add to metadata index
-            self.metadata_index.add(metadata_embeddings.astype(np.float32))
+            vectors = embeddings.astype(np.float32)
+            self.index.add(vectors)
 
-            # If successful, update in-memory stores
-            for memory in new_memories:
-                self.memories[memory.vector_id] = memory
-                self.index_to_id.append(memory.vector_id)
-        
+            for mem in all_memories_to_add:
+                self.memories[mem.vector_id] = mem
+                self.index_to_id.append(mem.vector_id)
+
         except Exception as e:
-            logger.error(f"向 FAISS 索引批量添加向量失败: {e}")
-            # Note: A rollback mechanism here would be complex as FAISS doesn't
-            # support transactions. The rebuild_index serves as a recovery mechanism.
+            logger.error(f"向 FAISS 索引或元数据批量添加数据失败: {e}")
             raise
 
-        # 如果启用了持久化，则在更新后保存
+        # 5. 持久化
         if self.persist_dir:
             self._save_index()
             
-        # 返回第一个块的记忆对象以遵循协议签名
-        return new_memories[0]
+        # 6. 返回第一个父文档的记忆对象
+        # 注意：返回的Memory对象可能不完全代表所有已存储的数据
+        return next(mem for mem in all_memories_to_add if mem.metadata.get("is_parent") == "True")
     
     async def retrieve(
         self,
@@ -324,13 +302,10 @@ class FAISSMemoryStore(MemoryManager):
         time_range: Optional[Tuple[dt.datetime, dt.datetime]] = None,
     ) -> Sequence[Tuple[Memory, float]]:
         """
-        根据查询字符串和可选过滤器检索记忆。
+        使用父子文档策略检索记忆。
 
-        此方法执行一个混合搜索：
-        1. 使用查询文本并行搜索内容向量和元数据向量。
-        2. 合并两路搜索结果。
-        3. 根据最高相似度分数对结果进行排序和去重。
-        4. 应用任何指定的精确过滤器（如类型、时间范围）。
+        此方法会搜索父向量和子向量，但总是返回父文档以提供完整的上下文。
+        它会根据父文档获得的最高分（无论是直接命中还是通过其子文档命中）进行排序。
         
         Args:
             query: 搜索查询
@@ -339,70 +314,81 @@ class FAISSMemoryStore(MemoryManager):
             time_range: 可选的按时间范围过滤 (开始, 结束)
             
         Returns:
-            按最高相似度排序的 (Memory, score) 元组列表
+            一个 (Memory, score) 元组的列表，其中Memory对象总是父文档。
         """
-        if self.content_index.ntotal == 0:
+        if not self.memories or self.index.ntotal == 0:
             return []
         
         # 1. 为查询生成嵌入
-        query_vector = await self.embedding_service.embed_text(query)
-        query_vector = query_vector.reshape(1, -1).astype(np.float32)
+        query_embedding = await self.embedding_service.embed_text(query)
+        query_vector = query_embedding.reshape(1, -1).astype(np.float32)
         
-        # 2. 并行搜索内容和元数据索引
-        k = min(limit * 5, self.content_index.ntotal) # 检索更多结果以供选择
+        # 2. 在整个索引中进行广泛搜索 (父+子)
+        # 我们需要检索比 limit 更多的结果，因为多个子文档可能指向同一个父文档
+        k = min(limit * 10, self.index.ntotal)
+        if k == 0:
+            return []
+            
+        distances, indices = self.index.search(query_vector, k)
         
-        content_distances, content_indices = self.content_index.search(query_vector, k)
-        metadata_distances, metadata_indices = self.metadata_index.search(query_vector, k)
+        # 3. 处理结果，将命中的子文档重定向到父文档
+        parent_candidates: Dict[str, Tuple[Memory, float]] = {}
 
-        # 3. 合并和处理结果
-        all_results: Dict[str, Tuple[Memory, float]] = {}
-
-        # 处理内容搜索结果
-        for i, idx in enumerate(content_indices[0]):
-            if idx < 0 or idx >= len(self.index_to_id): continue
-            mem_id = self.index_to_id[idx]
-            score = float(content_distances[0][i])
-            if mem_id not in all_results or score > all_results[mem_id][1]:
-                memory = self.memories.get(mem_id)
-                if memory:
-                    all_results[mem_id] = (memory, score)
-
-        # 处理元数据搜索结果
-        for i, idx in enumerate(metadata_indices[0]):
-            if idx < 0 or idx >= len(self.index_to_id): continue
-            mem_id = self.index_to_id[idx]
-            score = float(metadata_distances[0][i])
-            if mem_id not in all_results or score > all_results[mem_id][1]:
-                memory = self.memories.get(mem_id)
-                if memory:
-                    all_results[mem_id] = (memory, score)
-
-        # 4. 应用精确过滤器
-        filtered_results = []
-        for mem, score in all_results.values():
-            if filter_type and mem.type != filter_type:
+        for i, idx in enumerate(indices[0]):
+            if idx < 0 or idx >= len(self.index_to_id):
+                continue
+            
+            memory_id = self.index_to_id[idx]
+            memory = self.memories.get(memory_id)
+            
+            if not memory:
+                continue
+            
+            # -- 应用过滤器 --
+            if filter_type and memory.type != filter_type:
                 continue
             if time_range:
-                start, end = time_range
-                if not (start <= mem.timestamp <= end):
+                start_time, end_time = time_range
+                if not (start_time <= memory.timestamp <= end_time):
                     continue
-            filtered_results.append((mem, score))
 
-        # 5. 实现混合排序逻辑并返回
-        # - Group 0: 相似度 > 0.77, 按时间降序
-        # - Group 1: 相似度 <= 0.77, 按相似度降序
+            similarity_score = float(distances[0][i])
+            
+            parent_id_to_use = None
+            # 判断命中的是父文档还是子文档
+            if memory.metadata.get("is_parent") == "True":
+                parent_id_to_use = memory.vector_id
+            elif memory.metadata.get("parent_id"):
+                parent_id_to_use = memory.metadata["parent_id"]
+
+            if parent_id_to_use:
+                # 如果这个父文档已经作为候选，我们只保留分数更高的那次命中
+                if parent_id_to_use not in parent_candidates or similarity_score > parent_candidates[parent_id_to_use][1]:
+                    parent_memory = self.memories.get(parent_id_to_use)
+                    if parent_memory:
+                         parent_candidates[parent_id_to_use] = (parent_memory, similarity_score)
+
+        # 4. 按我们定义的多重逻辑对唯一的父文档进行排序
+        # - Group 0: 相似度 > 0.78, 按时间戳降序 (最近的在前)
+        # - Group 1: 相似度 <= 0.78, 按相似度分数降序
         def sort_key(item: Tuple[Memory, float]):
             memory, score = item
-            if score > 0.77:
-                # Group 0: 按时间戳降序 (最近的在前)
-                return (0, -memory.timestamp.timestamp(), -score)
+            if score > 0.78:
+                return (0, -memory.timestamp.timestamp(), -score) # 在时间相同的情况下，仍然按分数排序
             else:
-                # Group 1: 按相似度分数降序
-                return (1, -score, -memory.timestamp.timestamp())
+                return (1, -score, 0) # 填充一个值以保持元组结构一致
 
-        filtered_results.sort(key=sort_key)
+        sorted_parents = sorted(parent_candidates.values(), key=sort_key)
         
-        return filtered_results[:limit]
+        return sorted_parents[:limit]
+        
+    async def get(self, vector_id: str) -> Optional[Memory]:
+        """Retrieve a single memory object by its unique vector_id."""
+        return self.memories.get(vector_id)
+
+    async def count(self) -> int:
+        """Return the total number of memory chunks in the store."""
+        return len(self.memories)
         
     def optimize_index(self) -> None:
         """
@@ -411,7 +397,7 @@ class FAISSMemoryStore(MemoryManager):
         对于大型索引，此方法可以通过添加额外的索引结构来提高检索性能。
         """
         # 如果索引中的向量数量较少，不需要优化
-        if self.content_index.ntotal < 1000:
+        if self.index.ntotal < 1000:
             return
             
         # 目前我们使用的是基本的IndexFlatIP，它对于小型索引已经足够快
@@ -437,74 +423,75 @@ class FAISSMemoryStore(MemoryManager):
     
     async def delete(self, vector_id: str) -> bool:
         """
-        从索引中删除一个记忆块。
+        从索引中删除一个单独的记忆块。
 
-        注意：为了确保数据一致性，此操作会从内存中移除记忆，
-        然后完全重建FAISS索引。这在大规模数据集上可能会很慢。
+        此方法仅删除指定的单个向量，然后重建索引。
+        如果需要删除整个父文档及其所有关联的子文档，请使用 `delete_document` 方法。
         
         Args:
-            vector_id: 要删除的记忆块的唯一ID
+            vector_id: 要删除的记忆块的唯一ID。
             
         Returns:
-            如果成功则返回 True，否则返回 False
+            True if successful, False otherwise.
         """
         if vector_id not in self.memories:
             print_warning(self.delete, f"尝试删除不存在的记忆ID: {vector_id}")
             return False
             
         try:
-            # 1. 从元数据中移除
+            # 只从元数据中移除这一个记忆块
             self.memories.pop(vector_id, None)
-            logger.info(f"已从元数据中标记删除记忆 {vector_id}，即将重建索引。")
             
-            # 2. 重建索引以物理删除向量
+            logger.info(f"已标记删除记忆ID: {vector_id}。即将重建索引。")
+            # 重建索引以物理删除向量
             await self.rebuild_index()
 
         except Exception as e:
-            logger.error(f"删除记忆 {vector_id} 并重建索引时出错: {e}")
+            logger.error(f"删除记忆 {vector_id} 时出错: {e}", exc_info=True)
             return False
 
-        # 3. 持久化操作已在 rebuild_index 中处理
         return True
 
-    async def delete_document(self, document_id: str) -> Tuple[bool, int]:
+    async def delete_document(self, parent_id: str) -> Tuple[bool, int]:
         """
-        删除与一个文档关联的所有记忆块。
+        删除一个父文档及其所有关联的子文档。
 
-        此方法会找到所有具有相同 `document_id` 的块，将它们全部删除，
-        然后重建索引。
+        此方法会找到指定ID的父文档，以及所有通过 `parent_id` 
+        元数据指向它的子文档，然后将它们全部删除并重建索引。
         
         Args:
-            document_id: 要删除的文档的ID
+            parent_id: 要删除的父文档的唯一ID
             
         Returns:
             一个元组 (success: bool, chunks_deleted: int)
         """
-        ids_to_delete = [
-            mem_id for mem_id, mem in self.memories.items()
-            if mem.metadata.get("document_id") == document_id
-        ]
+        # 1. 查找所有要删除的记忆ID (父+子)
+        ids_to_delete = {parent_id}
+        for mem_id, mem in self.memories.items():
+            if mem.metadata.get("parent_id") == parent_id:
+                ids_to_delete.add(mem_id)
         
-        if not ids_to_delete:
-            print_warning(self.delete_document, f"未找到 document_id 为 {document_id} 的记忆块。")
+        # 检查是否找到了任何东西
+        if not any(mem_id in self.memories for mem_id in ids_to_delete):
+            print_warning(self.delete_document, f"未找到 parent_id 为 {parent_id} 的任何记忆块。")
             return False, 0
             
         try:
-            # 1. 从元数据中移除所有相关的块
+            # 2. 从元数据中移除所有相关的块
             deleted_count = 0
             for mem_id in ids_to_delete:
                 if self.memories.pop(mem_id, None):
                     deleted_count += 1
             
             if deleted_count > 0:
-                logger.info(f"已从元数据中标记删除 {deleted_count} 个属于文档 {document_id} 的记忆块，即将重建索引。")
-                # 2. 重建索引
+                logger.info(f"已从元数据中标记删除 {deleted_count} 个属于文档 {parent_id} 的记忆块，即将重建索引。")
+                # 3. 重建索引
                 await self.rebuild_index()
             else:
                 return False, 0
 
         except Exception as e:
-            logger.error(f"删除文档 {document_id} 并重建索引时出错: {e}")
+            logger.error(f"删除文档 {parent_id} 并重建索引时出错: {e}")
             return False, 0
             
         return True, deleted_count
@@ -518,25 +505,24 @@ class FAISSMemoryStore(MemoryManager):
         """
         logger.info("正在清除所有记忆并重置索引...")
         
-        # 1. 重置内存中的数据结构
+        # 1. Reset in-memory data structures
         self.memories.clear()
         self.index_to_id.clear()
         
-        # 2. 创建一个新的空 FAISS 索引
-        self.content_index = faiss.IndexFlatIP(self.vector_dim)
-        self.metadata_index = faiss.IndexFlatIP(self.vector_dim)
+        # 2. Create a new empty FAISS index
+        self.index = faiss.IndexFlatIP(self.vector_dim)
         
-        # 3. 如果启用了持久化，则保存空的索引和元数据，并删除旧文件
+        # 3. If persistence is enabled, save this empty state
         if self.persist_dir:
-            # 首先保存空的元数据和ID映射
+            # First save empty metadata and ID mapping
             self._save_index() 
-            # 然后处理索引文件
-            index_path = self._get_content_index_path()
+            # Then handle index file
+            index_path = self._get_index_path()
             try:
                 if os.path.exists(index_path):
                     os.remove(index_path) 
-                # 写入新的空索引
-                faiss.write_index(self.content_index, index_path) 
+                # Write new empty index
+                faiss.write_index(self.index, index_path) 
             except OSError as e:
                 print_warning(self.clear, f"清除或写入持久化文件时出错: {e}")
 
@@ -553,38 +539,31 @@ class FAISSMemoryStore(MemoryManager):
         logger.info("开始重建FAISS索引...")
         
         new_index = faiss.IndexFlatIP(self.vector_dim)
-        new_index_meta = faiss.IndexFlatIP(self.vector_dim)
+        
+        # Only rebuild from what's currently in self.memories
         all_memories_to_rebuild = list(self.memories.values())
 
         if not all_memories_to_rebuild:
-            self.content_index = new_index
-            self.metadata_index = new_index_meta
+            self.index = new_index
             self.index_to_id = []
             if self.persist_dir:
                 self._save_index()
             logger.info("没有记忆可用于重建索引，索引已清空。")
             return
         
-        # Re-embed content and metadata
-        content_texts = [mem.original_text for mem in all_memories_to_rebuild]
-        metadata_texts = [self._metadata_to_text(mem) for mem in all_memories_to_rebuild]
+        all_texts = [mem.original_text for mem in all_memories_to_rebuild]
         
-        content_embeddings = await self.embedding_service.embed_text(content_texts)
-        metadata_embeddings = await self.embedding_service.embed_text(metadata_texts)
+        embeddings = await self.embedding_service.embed_text(all_texts)
         
-        # Rebuild indexes
-        if content_embeddings.ndim == 2 and content_embeddings.shape[0] > 0:
-            new_index.add(content_embeddings.astype(np.float32))
-            new_index_meta.add(metadata_embeddings.astype(np.float32))
-
+        if embeddings.ndim == 2 and embeddings.shape[0] > 0:
+            new_index.add(embeddings.astype(np.float32))
+            # 确保ID的顺序与文本和嵌入的顺序一致
             self.index_to_id = [mem.vector_id for mem in all_memories_to_rebuild]
-            self.content_index = new_index
-            self.metadata_index = new_index_meta
-            logger.info(f"{self.content_index.ntotal} 个向量已成功添加到新索引中。")
+            self.index = new_index
+            logger.info(f"{self.index.ntotal} 个向量已成功添加到新索引中。")
         else:
             print_warning(self.rebuild_index, "没有有效的嵌入可添加到索引中，索引将为空。")
-            self.content_index = new_index
-            self.metadata_index = new_index_meta
+            self.index = new_index
             self.index_to_id = []
         
         if self.persist_dir:
@@ -597,42 +576,50 @@ _default_memory_manager: Optional[FAISSMemoryStore] = None
 
 async def get_memory_manager(
     persist_dir: Optional[str] = None,
-    embedding_model: str = "BAAI/bge-base-zh",
-) -> FAISSMemoryStore:
+    embedding_model_key: Optional[str] = None,
+) -> MemoryManager:
     """
-    Get or create the default memory manager instance.
-    This is now an async function to handle async initialization.
+    获取或创建默认的记忆管理器实例。
+    此函数现在是异步的，以处理异步初始化。
     
     Args:
-        persist_dir: Directory to persist the index and metadata
-        embedding_model: Name of the embedding model to use
+        persist_dir: 持久化索引和元数据的目录
+        embedding_model_key: 要使用的嵌入模型的键 (来自config.py)
         
     Returns:
-        A fully initialized FAISSMemoryStore instance
+        一个完全初始化的 FAISSMemoryStore 实例，但类型注解为 MemoryManager 协议。
     """
     global _default_memory_manager
     
-    # Create new instance if one doesn't exist or if the model has changed.
-    if _default_memory_manager is None or _default_memory_manager.embedding_service.model_name != embedding_model:
-        
-        if _default_memory_manager is not None:
-            logger.info(f"Switching embedding model from {_default_memory_manager.embedding_service.model_name} to {embedding_model}")
+    # 如果没有指定模型键，则使用默认的
+    if embedding_model_key is None:
+        from ..core.config import VECTORIZATION_CONFIG
+        embedding_model_key = VECTORIZATION_CONFIG['default_model']
 
-        # Default persistence directory if not provided
+    # 检查是否需要创建新实例
+    # 如果实例不存在，或者模型的键已更改，则创建新实例
+    create_new = False
+    if _default_memory_manager is None:
+        create_new = True
+    elif _default_memory_manager.embedding_service.model_config.get('model_name') != get_embedding_service(embedding_model_key).model_config.get('model_name'):
+        logger.info(f"检测到嵌入模型切换，将从 '{_default_memory_manager.embedding_service.model_config.get('model_name')}' 切换到 '{embedding_model_key}'")
+        create_new = True
+
+    if create_new:
+        # 默认持久化目录
         if persist_dir is None:
-            base_dir = Path(__file__).parent.parent.parent.parent  # Go up to project root
+            base_dir = Path(__file__).parent.parent.parent.parent
             persist_dir = os.path.join(base_dir, "data", "memory_store")
             os.makedirs(persist_dir, exist_ok=True)
         
-        # Set up embedding service, ensuring it's a fresh one for the new model
-        embedding_service = get_embedding_service(model_name=embedding_model, force_new=True)
+        # 获取由新键指定的嵌入服务
+        embedding_service = get_embedding_service(model_key=embedding_model_key, force_new=True)
         
-        # Create the memory manager instance
+        # 创建记忆管理器实例
         _default_memory_manager = FAISSMemoryStore(
             embedding_service=embedding_service,
             persist_dir=persist_dir
         )
-        # Asynchronously initialize it (loads data, migrates if needed, etc.)
         await _default_memory_manager._initialize()
     
     return _default_memory_manager

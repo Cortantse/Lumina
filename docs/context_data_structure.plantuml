@@ -1,0 +1,62 @@
+@startuml 上下文数据结构
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultTextAlignment center
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAA33
+skinparam roundCorner 10
+skinparam BoxPadding 10
+
+' 数据结构定义区
+package "数据结构" as DataStructures {
+  class "ToBeProcessedTurns" as TBP {
+    +all_transcripts_in_current_turn: List[ExpandedTurn]
+  }
+
+  class "LLMContext" as LLMC {
+    +history: List[DialogueTurn]
+    +system_context: SystemContext
+    +system_prompt: str
+    +format_for_llm(): list[dict]
+  }
+
+  class "SystemContext" as SC {
+    +directives: Dict[str, Any]
+    +add(key, value)
+    +format(): str
+  }
+
+  class "ExpandedTurn" as ET {
+    +transcript: str
+    +image_inputs: List[ImageInput]
+    +retrieved_memories: List[Memory]
+    +timestamp: str
+  }
+
+  class "MultipleExpandedTurns" as MET {
+    +turns: List[ExpandedTurn]
+  }
+
+  class "AgentResponseTurn" as ART {
+    +response: str
+    +was_interrupted: bool
+    +timestamp: str
+  }
+  
+  class "Memory" as MEM {
+    +original_text: str
+    +timestamp: str
+    +...其他属性...
+  }
+
+  LLMC *-- "0..n" ET : 包含 >
+  LLMC *-- "0..n" MET : 包含 >
+  LLMC *-- "0..n" ART : 包含 >
+  LLMC *-- "1" SC : 包含 >
+  TBP *-- "0..n" ET : 缓存 >
+  MET *-- "1..n" ET : 包含 >
+  ET *-- "0..n" MEM : 包含检索到的 >
+}
+@enduml 
