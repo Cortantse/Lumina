@@ -25,6 +25,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, Any
 import uuid
+from datetime import timezone, timedelta
+
+# 定义中国标准时间 (UTC+8)
+CST = timezone(timedelta(hours=8))
 
 # ---------- 1. MemoryType Enum ---------- #
 class MemoryType(str, Enum):
@@ -58,7 +62,7 @@ class Memory:
     
     # 核心字段
     vector_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: dt.datetime = field(default_factory=dt.datetime.utcnow)
+    timestamp: dt.datetime = field(default_factory=lambda: dt.datetime.now(CST))
     metadata: Dict[str, Any] = field(default_factory=dict)
     blob_uri: Optional[str] = None
     

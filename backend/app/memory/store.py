@@ -249,7 +249,6 @@ class FAISSMemoryStore(RetrievalMixin):
                     child_memories.append(Memory(
                         original_text=combined_tags_text,
                         type=mem_type,
-                        timestamp=dt.datetime.utcnow(),
                         vector_id=str(uuid.uuid4()),
                         metadata={
                             "is_parent": "False",
@@ -265,7 +264,6 @@ class FAISSMemoryStore(RetrievalMixin):
                     child_memories.append(Memory(
                         original_text=summary_text,
                         type=mem_type,
-                        timestamp=dt.datetime.utcnow(),
                         vector_id=str(uuid.uuid4()),
                         metadata={
                             "is_parent": "False",
@@ -279,7 +277,6 @@ class FAISSMemoryStore(RetrievalMixin):
                 parent_memory = Memory(
                     original_text=parent_chunk,
                     type=mem_type,
-                    timestamp=dt.datetime.utcnow(),
                     vector_id=parent_id,
                     metadata={
                         "is_parent": "True",

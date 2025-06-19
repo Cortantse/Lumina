@@ -1,10 +1,11 @@
 # app.protocols.context.py 上下文修改协议
 import asyncio
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict
 from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, SystemContext
 from app.models.image import ImageInput
 from app.protocols.memory import Memory
+from app.memory.store import get_memory_manager
 
 """
 为了方便修改上下文，我们定义一个上下文修改协议，这个协议定义了如何修改上下文。
@@ -38,17 +39,50 @@ async def is_ended_by_std(to_be_processed_turns: ToBeProcessedTurns, llm_context
 # --- 接口：记忆模块自动添加高度相关记忆 --- #
 async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) -> None:
     """
-    添加高度相关记忆到上下文，被动根据当前在讲什么添加
+    根据当前回合的文本和图像描述，从记忆库中检索相关记忆，
+    并将其添加到 ExpandedTurn 对象中。
+    
+    此函数会并发执行所有查询，并对结果进行去重。
     """
-    # 文本和多模态分别检索记忆
+    # 1. 准备查询列表
     queries = [to_be_processed_turn.transcript]
     if to_be_processed_turn.image_inputs:
-        queries.extend([image_input.short_description for image_input in to_be_processed_turn.image_inputs])
+        # 只为有描述的图片添加查询
+        queries.extend([
+            img.short_description 
+            for img in to_be_processed_turn.image_inputs 
+            if img.short_description and img.short_description.strip()
+        ])
     
-    # [TODO] 假设获得了对应的记忆，炳祥
-    memories = []
+    # 如果没有任何有效的查询内容，则直接返回
+    if not any(q and q.strip() for q in queries):
+        return
 
-    to_be_processed_turn.retrieved_memories.extend(memories)
+    # 2. 获取记忆管理器
+    memory_manager = await get_memory_manager()
+
+    # 3. 并发执行所有检索任务
+    # 为每个查询检索少量（例如3个）最相关的结果，以平衡相关性和上下文长度
+    retrieval_tasks = [memory_manager.retrieve(query, limit=3) for query in queries]
+    results = await asyncio.gather(*retrieval_tasks, return_exceptions=True)
+
+    # 4. 处理并去重结果
+    # 使用一个字典来存储唯一的父文档记忆，以其ID为键
+    unique_memories: Dict[str, Memory] = {}
+    for res in results:
+        if isinstance(res, Exception):
+            # 在实际应用中，这里应该使用日志模块来记录错误
+            print(f"检索记忆时发生错误: {res}")
+            continue
+        
+        # retrieve 方法返回 (Memory, score) 元组的列表
+        for memory, score in res:
+            # retrieval.py 已经保证返回的是父文档，用其ID作为去重的键
+            if memory.vector_id not in unique_memories:
+                unique_memories[memory.vector_id] = memory
+    
+    # 5. 将去重后的唯一记忆添加到上下文中
+    to_be_processed_turn.retrieved_memories.extend(unique_memories.values())
 
 
 async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn: ExpandedTurn) -> List[Memory]:

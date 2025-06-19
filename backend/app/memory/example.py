@@ -218,6 +218,50 @@ async def query_memory_interactive(memory_manager: MemoryManager) -> None:
     except Exception as e:
         print(f"查询记忆失败: {e}")
 
+async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
+    """
+    交互式测试 add_retrieved_memories_to_context 接口。
+    """
+    from app.protocols.context import add_retrieved_memories_to_context
+    from app.models.context import ExpandedTurn
+    
+    print("\n===== 测试被动记忆检索接口 =====")
+    print("这个测试会模拟一个对话回合，并自动检索相关记忆。")
+    
+    # 1. 获取用户当前的输入
+    content = await async_input("请输入当前的对话内容 (例如 '我喜欢什么动物?') : ")
+    if not content.strip():
+        print("内容不能为空。操作取消。")
+        return
+
+    # 2. 构造一个 ExpandedTurn
+    # 就像在真实流程中一样，它一开始没有检索到的记忆
+    turn = ExpandedTurn(transcript=content)
+    
+    # 3. 调用核心接口
+    print("\n正在调用 add_retrieved_memories_to_context...")
+    start_time = time.time()
+    try:
+        await add_retrieved_memories_to_context(turn)
+        elapsed = time.time() - start_time
+        print(f"接口执行完成 (耗时: {elapsed:.4f}秒)。")
+    except Exception as e:
+        print(f"调用接口时发生错误: {e}")
+        return
+
+    # 4. 打印结果
+    print(f"\n为输入 '{content}' 检索到 {len(turn.retrieved_memories)} 条相关记忆:")
+    if not turn.retrieved_memories:
+        print("-> 未检索到任何记忆。")
+        print("-> 提示: 请先用选项 '1. 存储新记忆' 存入一些相关内容再测试。")
+        return
+
+    for i, (memory, score) in enumerate(turn.retrieved_memories):
+        print(f"\n{i+1}. [父文档] (相似度: {score:.4f})")
+        print(f"   内容: {memory.original_text}")
+        print(f"   ID: {memory.vector_id}")
+        print(f"   时间: {memory.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+
 async def show_menu() -> int:
     """
     显示主菜单并获取用户选择。
@@ -231,10 +275,11 @@ async def show_menu() -> int:
     print("1. 存储新记忆")
     print("2. 查询记忆")
     print("3. 清除所有记忆")
+    print("4. 测试被动记忆检索")
     print("0. 退出")
     print("=" * 40)
     
-    choice = await async_input("请选择操作 [0-3]: ")
+    choice = await async_input("请选择操作 [0-4]: ")
     try:
         return int(choice)
     except ValueError:
@@ -274,6 +319,8 @@ async def main():
                 await clear_all_memories(memory_manager)
             else:
                 print("操作已取消。")
+        elif choice == 4:
+            await test_passive_retrieval_interactive(memory_manager)
         else:
             print("\n无效选择，请重试。")
 
