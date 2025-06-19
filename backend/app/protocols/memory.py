@@ -50,32 +50,42 @@ class Memory:
     - original_text: 原始文本内容，用于检索与重现。
     - type: 对应 MemoryType。
     - timestamp: UTC 时间戳，用于冷/热排序与衰减管理。
+    - vector_id: 记忆块的唯一ID。对于父文档，这是文档ID；对于子文档，这是它自身的ID。
+    - metadata: 包含附加信息的字典，如 is_parent, parent_id, child_type 等。
     """
     original_text: str
     type: MemoryType
+    
+    # 核心字段
     vector_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: dt.datetime = field(default_factory=dt.datetime.utcnow)
-
-    # 用于父子文档策略的索引
-    indexes: List[Tuple[str, str]] = field(default_factory=list)
-    
-    # 附加元数据，如 is_parent, parent_id 等都存储在这里
     metadata: Dict[str, Any] = field(default_factory=dict)
     blob_uri: Optional[str] = None
-
-    # New fields for Parent-Child strategy
-    is_summary: bool = False
-
-    # 可在 metadata 中添加: ttl, source, confidence_score, embedding_version, language 等
+    
+    # 不再需要 is_summary 和 indexes 字段，相关信息移入 metadata
 
     def to_dict(self) -> Dict[str, Any]:
-        """将Memory对象序列化为字典，以便JSON存储。"""
-        mem_dict = self.__dict__.copy()
-        if isinstance(mem_dict.get('timestamp'), dt.datetime):
-            mem_dict['timestamp'] = mem_dict['timestamp'].isoformat()
-        if isinstance(mem_dict.get('type'), MemoryType):
-            mem_dict['type'] = mem_dict['type'].value
-        return mem_dict
+        """将 Memory 对象序列化为字典，以便存入 JSON。"""
+        return {
+            "original_text": self.original_text,
+            "type": self.type.name,  # 存储枚举的名称
+            "blob_uri": self.blob_uri,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp.isoformat(),
+            "vector_id": self.vector_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Memory:
+        """从字典反序列化为 Memory 对象。"""
+        return cls(
+            original_text=data["original_text"],
+            type=MemoryType[data["type"]],  # 从名称恢复枚举成员
+            blob_uri=data.get("blob_uri"),
+            metadata=data.get("metadata", {}),
+            timestamp=dt.datetime.fromisoformat(data["timestamp"]),
+            vector_id=data["vector_id"],
+        )
 
 # ---------- 3. Protocol Interfaces ---------- #
 class MemoryWriter(Protocol):
@@ -88,7 +98,7 @@ class MemoryWriter(Protocol):
         original_text: str,
         mem_type: MemoryType,
         *,
-        metadata: Optional[Mapping[str, str]] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
         blob_uri: Optional[str] = None,
     ) -> Memory:
         ...  # 返回 Memory 以便链式操作和日志审计
@@ -125,14 +135,6 @@ class MemoryManager(MemoryWriter, MemoryReader, Protocol):
 
     async def count(self) -> int:
         """Returns the total number of memory chunks in the store."""
-        ...
-
-    async def delete(self, vector_id: str) -> bool:
-        """Deletes a single memory chunk by its unique vector_id."""
-        ...
-
-    async def delete_document(self, document_id: str) -> Tuple[bool, int]:
-        """Deletes all memory chunks associated with a document_id."""
         ...
 
     async def clear(self) -> None:
