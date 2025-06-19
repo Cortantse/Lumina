@@ -41,6 +41,15 @@ class ExpandedTurn:
 
     timestamp: str = field(default_factory=lambda: time.time())
 
+
+@dataclass
+class MultipleExpandedTurns:
+    """
+    多个展开的回合
+    """
+    turns: List[ExpandedTurn] = field(default_factory=list)
+    
+
 @dataclass
 class CompressedTurn:
     """
@@ -66,8 +75,8 @@ class AgentResponseTurn:
 
 
 
-# 类型别名，明确表示一个对话回合只能是三种状态之一
-DialogueTurn = Union[ExpandedTurn, CompressedTurn, AgentResponseTurn]
+# 类型别名，明确表示一个对话回合只能是四种状态之一
+DialogueTurn = Union[ExpandedTurn, CompressedTurn, AgentResponseTurn, MultipleExpandedTurns]
 
 
 # --- 全局上下文 ---
@@ -125,32 +134,34 @@ class LLMContext:
         按时间顺序组织整个上下文，并格式化为单个字符串。
 
         - 展开的回合 (`ExpandedTurn`) 会显示详细信息。
+        - 多个展开的回合 (`MultipleExpandedTurns`) 会显示拼接详细信息。
         - 压缩的回合 (`CompressedTurn`) 只显示摘要。
         - 回答的回合 (`AgentResponseTurn`) 显示回答内容和是否被用户打断。
         """
         prompts = []
 
+        # 0. 添加系统提示词
+        prompts.append({
+            "role": "system",
+            "content": self.system_prompt
+        })
+
         # 1. 添加对话历史
         for turn in self.history:
             if isinstance(turn, ExpandedTurn):
                 # 处理展开的用户回合
-                user_part = f"时间: {turn.timestamp}， 用户: {turn.transcript}\n"
-                if turn.image_inputs:
-                    user_part += f" 本次转录包含 {len(turn.image_inputs)} 张图片， 描述如下："
-                    for index, image_input in enumerate(turn.image_inputs):
-                        # 暂时只添加描述
-                        user_part += f" [图片{index}的描述: {image_input.short_description}]"
-                
-                if turn.retrieved_memories:
-                    # 暂时直接显示记忆内容
-                    retrieved = "\n".join(f"记忆{index}， 时刻{mem.timestamp}: {mem.original_text}" for index, mem in enumerate(turn.retrieved_memories))
-                    user_part += f"\n (本次转录检索到的可能有用的相关历史记忆):\\n{retrieved}"
+                user_part = self.translate_expanded_turn(turn)
                 
                 prompts.append({
                     "role": "user",
                     "content": user_part
                 })
-
+            elif isinstance(turn, MultipleExpandedTurns):
+                # 处理多个展开的回合
+                prompts.append({
+                    "role": "user",
+                    "content": self.translate_multiple_expanded_turns(turn)
+                })
             elif isinstance(turn, CompressedTurn):
                 # 处理压缩的历史回合
                 prompts.append({
@@ -172,4 +183,27 @@ class LLMContext:
 
         return prompts
 
+
+    def translate_expanded_turn(self, turn: ExpandedTurn) -> str:
+        """
+        将展开的回合转换为字符串
+        """
+        user_part = f"时间: {turn.timestamp}， 用户: {turn.transcript}\n"
+        if turn.image_inputs:
+            user_part += f" 本次转录包含 {len(turn.image_inputs)} 张图片， 描述如下："
+            for index, image_input in enumerate(turn.image_inputs):
+                        # 暂时只添加描述
+                user_part += f" [图片{index}的描述: {image_input.short_description}]"
+                
+        if turn.retrieved_memories:
+                    # 暂时直接显示记忆内容
+            retrieved = "\n".join(f"记忆{index}， 时刻{mem.timestamp}: {mem.original_text}" for index, mem in enumerate(turn.retrieved_memories))
+            user_part += f"\n (本次转录检索到的可能有用的相关历史记忆):\\n{retrieved}"
+        return user_part
+
+    def translate_multiple_expanded_turns(self, turns: MultipleExpandedTurns) -> str:
+        """
+        将多个展开的回合转换为字符串
+        """
+        return "\n".join(self.translate_expanded_turn(turn) for turn in turns.turns)
         

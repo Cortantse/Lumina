@@ -212,6 +212,10 @@ class PipelineService:
 
                         text = await simple_send_request_to_llm(text)
 
+                        # 如果没有test 就不进行
+                        if not text:
+                            continue
+
                         # 获取音频流并发送到前端
                         audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
                         await send_tts_audio_stream(audio_stream)
