@@ -26,7 +26,14 @@ max_end_silence = 500 # 最大结束静默时间，单位：毫秒
 # 合理的块大小和重叠能显著影响检索的准确率。
 TEXT_SPLITTER_CONFIG = {
     "chunk_size": 100,      # 每个文本块的最大字符数。
-    "chunk_overlap": 20     # 相邻文本块之间的重叠字符数，以保持上下文的连续性。
+    "chunk_overlap": 15     # 相邻文本块之间的重叠字符数，以保持上下文的连续性。
+}
+
+# 记忆与检索相关配置
+MEMORY_CONFIG = {
+    "retrieval_similarity_threshold": 0.78, # 检索时，高于此相似度阈值的记忆会优先按时间排序
+    "child_search_multiplier": 10,          # 检索时，获取的原始候选数量 = limit * 此乘数，以处理父子文档关系
+    "index_optimize_threshold": 10000        # 当索引中的向量数量超过此值时，可以考虑进行优化
 }
 
 VECTORIZATION_CONFIG = {

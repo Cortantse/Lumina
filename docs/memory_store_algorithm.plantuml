@@ -1,0 +1,46 @@
+@startuml
+title 记忆存储 (Store) 算法流程
+
+|Main Thread|
+start
+:调用 store() 方法;
+:生成 initial_parent_id;
+:创建临时的父Memory对象;
+:立即返回该对象;
+stop
+
+|Background Task|
+fork
+:启动 _store_task;
+note right
+  接收 initial_parent_id
+end note
+:<b>[text_splitter.py]</b>
+使用 RecursiveCharacterTextSplitter
+将原文分割成 parent_chunks;
+if (分割后为空?) then (yes)
+  :打印警告并退出;
+  end
+endif
+repeat
+  :<b>[enhancer.py]</b>
+  为每个 chunk 生成
+  标签和摘要 (子文档);
+  :创建父/子 Memory 对象;
+repeat while (还有更多 chunk?)
+:<b>[embeddings.py]</b>
+批量向量化
+所有父/子文档的文本;
+:<b>[FAISS]</b>
+将所有新向量
+批量添加到 FAISS 索引;
+:更新内存中的
+memories 字典和
+index_to_id 列表;
+if (持久化已启用?) then (yes)
+  :<b>_save_index()</b>
+  将索引和元数据
+  写入磁盘文件;
+endif
+end fork
+@enduml 

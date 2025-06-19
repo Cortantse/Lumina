@@ -103,9 +103,10 @@ lumina/
 │   │   │
 │   │   ├── memory/                   # 长短期记忆存储与增强
 │   │   │   ├── __init__.py           # 模块接口暴露
-│   │   │   ├── store.py              # 基于FAISS的向量存储与检索实现(placeholder)
-│   │   │   ├── embeddings.py         # 文本向量化服务封装 (支持本地与OpenAI)(placeholder)
-│   │   │   ├── enhancer.py           # 记忆内容增强 (如LLM生成标签)
+│   │   │   ├── store.py              # 核心存储类 (FAISSMemoryStore)
+│   │   │   ├── retrieval.py          # 检索逻辑 (RetrievalMixin)
+│   │   │   ├── embeddings.py         # 文本向量化服务 (支持本地与OpenAI)
+│   │   │   ├── enhancer.py           # 记忆内容增强 (LLM生成标签/摘要)
 │   │   │   └── text_splitter.py      # 递归文本分块工具
 │   │   │
 │   │   ├── retrieval/                # 记忆检索
