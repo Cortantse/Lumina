@@ -256,8 +256,8 @@ async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
         print("-> 提示: 请先用选项 '1. 存储新记忆' 存入一些相关内容再测试。")
         return
 
-    for i, (memory, score) in enumerate(turn.retrieved_memories):
-        print(f"\n{i+1}. [父文档] (相似度: {score:.4f})")
+    for i, memory in enumerate(turn.retrieved_memories):
+        print(f"\n{i+1}. [父文档]")
         print(f"   内容: {memory.original_text}")
         print(f"   ID: {memory.vector_id}")
         print(f"   时间: {memory.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
