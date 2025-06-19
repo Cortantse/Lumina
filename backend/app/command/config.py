@@ -1,25 +1,5 @@
 from typing import Dict, List, Any
 
-# 控制命令关键词映射
-# CONTROL_COMMANDS = {
-#     "pause_tts": [
-#         "暂停", "停一下", "别说了", "先别说", "安静", "等等", 
-#         "停止", "闭嘴", "住口", "别讲了", "停下来"
-#     ],
-#     "resume_tts": [
-#         "继续", "接着说", "继续说", "说下去", "往下说", 
-#         "可以继续了", "请继续", "继续讲"
-#     ],
-#     "replay_tts": [
-#         "再说一遍", "重复", "重说", "刚才说什么", "再讲一次",
-#         "再念一次", "请重复", "再说一次"
-#     ],
-#     "exit_session": [
-#         "退出", "结束", "关闭", "再见", "拜拜", "结束对话",
-#         "停止对话", "关闭程序"
-#     ]
-# }
-
 # TTS配置命令关键词映射
 TTS_CONFIG_COMMANDS = {
     # 音色设置
@@ -204,42 +184,19 @@ INTENT_DICT = {
 
 # 快速意图分类字典（用单字符表示）
 FAST_INTENT_DICT = {
-    "B": "记忆操作和多模态触发类指令",
-    "C": "TTS配置类指令",
-    "E": "偏好设置类指令",
-    "F": "非命令输入"
+    "A": "记忆操作和多模态触发类指令",
+    "B": "TTS配置类指令",
+    "C": "偏好设置类指令",
+    "D": "非命令输入"
 }
 
 # LLM系统提示词
 INTENT_DETECTION_SYSTEM_PROMPTS = {
-    "intent_and_tool": """你是通义千问，由阿里云创建的AI助手。你是一个有帮助的助手。你可以调用一个或多个工具来协助用户查询。你可以使用的工具如下：
-{tools_string}
+    "intent_and_tool": """You are Qwen, created by Alibaba Cloud. You are a helpful assistant. You may call one or more tools to assist with the user query. The tools you can use are as follows:
+    {tools_string}
+    Response in INTENT_MODE.""",
 
-重要说明：
-1. 你可以根据需要同时调用多个不同工具。例如，用户可能同时需要设置TTS配置和查询记忆。
-2. 你也可以多次调用同一个工具进行不同操作。例如，用户可能既想设置音色又想设置语速。
-3. 对于TTS配置，请注意参数的有效性：
-   - 语速(speed)必须在0.5到2.0之间
-   - 音色(voice)必须从系统支持的音色列表中选择，仅使用中文名称（如"青涩青年音色"）
-4. 分析用户输入，尽可能全面地识别所有可能的命令和操作。
+    "intent_only": """You are Qwen, created by Alibaba Cloud. You are a helpful assistant. \nYou should choose one tag from the tag list:\n{intent_string}\njust reply with the chosen tag.""",
 
-请以INTENT_MODE模式回复。""",
-
-    "intent_only": """你是通义千问，由阿里云创建的AI助手。你是一个有帮助的助手。
-你应该从以下标签列表中选择一个标签：
-{intent_string}
-请只回复选择的标签。""",
-
-    "tool_call_only": """你是通义千问，由阿里云创建的AI助手。你是一个有帮助的助手。你可以调用一个或多个工具来协助用户查询。你可以使用的工具如下：
-{tools_string}
-
-重要说明：
-1. 你可以根据需要同时调用多个不同工具。例如，用户可能同时需要设置TTS配置和查询记忆。
-2. 你也可以多次调用同一个工具进行不同操作。例如，用户可能既想设置音色又想设置语速。
-3. 对于TTS配置，请注意参数的有效性：
-   - 语速(speed)必须在0.5到2.0之间
-   - 音色(voice)必须从系统支持的音色列表中选择，仅使用中文名称（如"青涩青年音色"）
-4. 分析用户输入，尽可能全面地识别所有可能的命令和操作。
-
-请以NORMAL_MODE模式回复。"""
+    "tool_call_only": """You are Qwen, created by Alibaba Cloud. You are a helpful assistant. You may call one or more tools to assist with the user query. The tools you can use are as follows:\n{tools_string}\nResponse in NORMAL_MODE."""
 }

@@ -105,12 +105,12 @@ class CommandDetector:
         """
         try:
             # 首先使用规则检测器检测
-            # rule_result = self.rule_detector.detect(text)
+            rule_result = self.rule_detector.detect(text)
             
             # 如果规则检测器识别到命令，直接返回
-            # if rule_result:
-            #     print(f"Rule-based detector found command: {rule_result}")
-            #     return rule_result
+            if rule_result:
+                print(f"Rule-based detector found command: {rule_result}")
+                return rule_result
             
             # # 使用语义匹配器进行检测
             # semantic_result = await self.semantic_matcher.match(text)
