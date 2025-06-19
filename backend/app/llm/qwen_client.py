@@ -4,7 +4,8 @@ from app.utils.request import send_request_async
 import json
 from datetime import datetime
 
-from app.models.context import LLMContext, ExpandedTurn, AgentResponseTurn, SystemContext
+from app.models.context import LLMContext, ExpandedTurn, AgentResponseTurn, MultipleExpandedTurns, SystemContext
+from app.protocols.context import ToBeProcessedTurns, add_new_transcript_to_context
 
 """
 async def send_request_async(messages: List[Dict[str, str]], model_name, max_retries=config.max_retries,
@@ -22,16 +23,22 @@ async def send_request_async(messages: List[Dict[str, str]], model_name, max_ret
     :return: 模型响应内容，总体token，生成token
     
 """
+
+_global_to_be_processed_turns = ToBeProcessedTurns(all_transcripts_in_current_turn=[])
+
 _llm_context = LLMContext(
     system_prompt="你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，请根据用户的问题给出简洁、快速但有情感的回答，注意回复能被转语音的内容，表情什么的不能。"
 )
 
-async def simple_send_request_to_llm(text: str):
+async def simple_send_request_to_llm(text: str) -> Optional[str]:
     """
     简单发送请求到LLM
     """
-    # 将用户输入添加到上下文历史
-    _llm_context.history.append(ExpandedTurn(transcript=text))
+    # 将用户输入添加到待处理区，这里暂时还没有多模态数据 # [TODO] 多模态
+    is_ended = await add_new_transcript_to_context(text, _global_to_be_processed_turns, _llm_context)
+    if not is_ended:
+        # 说明还没有结束，直接返回 None
+        return None
 
     # 获取格式化后的消息列表
     messages = _llm_context.format_for_llm()
@@ -52,16 +59,19 @@ async def simple_semantic_turn_detection(text: str) -> Optional[bool]:
     """
     # 为语义判断创建一个新的LLMContext实例，避免污染主对话上下文
     semantic_context = LLMContext(
-        system_prompt="你是一个语义完整性判断语音助手，你会通过用户的历史对话和你的记忆，判断用户此时是否说完话了，返回值只能为**一个字符** Y 或 N，表示用户是否说完话了。你会首先获得用户历史的历史和当轮你需要判断的文本，然后判断用户是否说完话了。"
+        system_prompt=f"你是一个语义完整性判断语音助手，你会通过用户的历史对话和你的记忆，判断用户此时是否说完话了，返回值只能为**一个字符** Y 或 N，表示用户是否说完话了。你会首先获得用户历史的历史和当轮你需要判断的文本，然后判断用户是否说完话了。"
+        f"你目前的调度为比较激进，除非明显用户的话只完成了一半/不完整才返回 N，否则返回 Y"
     )
+
+    return True # [TODO] 暂时返回 True
 
     # 从主对话上下文中提取最近两条用户说话文本及对应的助手回答
     user_turns_count = 0
     for turn in reversed(_llm_context.history):
-        if isinstance(turn, ExpandedTurn):
+        if isinstance(turn, ExpandedTurn) or isinstance(turn, MultipleExpandedTurns):
             semantic_context.history.insert(0, turn)
             user_turns_count += 1
-            if user_turns_count >= 2: # 最多获取最近两条用户对话
+            if user_turns_count >= 4: # 最多获取最近两条用户对话
                 break
         elif isinstance(turn, AgentResponseTurn) and user_turns_count > 0:
             semantic_context.history.insert(0, turn) # 插入到用户对话之后
@@ -77,8 +87,10 @@ async def simple_semantic_turn_detection(text: str) -> Optional[bool]:
     result = None
     if response == 'Y':
         result = True
+        print(f"【调试】[QwenClient] 语义完整判断成功，回复: '{response}'")
     elif response == 'N':
         result = False
+        print(f"【调试】[QwenClient] 语义完整判断失败，回复: '{response}'")
     else:
         print(f"【调试】[QwenClient] 语义判断失败，回复: '{response}'，不属于任何一个值")
         result = None
