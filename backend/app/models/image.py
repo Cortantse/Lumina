@@ -12,4 +12,6 @@ class ImageInput:
     format: str               # e.g. "png", "jpeg"
     timestamp: float = field(default_factory=lambda: time.time())
 
+    short_description: str = field(default="") # 大致描述内容
+
 
