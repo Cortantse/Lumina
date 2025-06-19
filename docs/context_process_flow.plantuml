@@ -1,0 +1,127 @@
+@startuml 上下文处理流程
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+skinparam defaultTextAlignment center
+skinparam noteBackgroundColor #FFFFCC
+skinparam noteBorderColor #AAAA33
+skinparam roundCorner 10
+skinparam ParticipantPadding 30
+skinparam SequenceArrowThickness 1
+
+' 函数调用流程图
+actor "用户" as User
+participant "qwen_client.py" as QwenClient
+participant "context.py" as ContextProtocol
+participant "models/context.py" as ContextModels
+participant "send_request_async" as API
+
+' 全局变量
+note over QwenClient
+  **全局变量**
+  _global_to_be_processed_turns: ToBeProcessedTurns
+  _llm_context: LLMContext
+end note
+
+' 主流程图
+User -> QwenClient : 发送文本
+activate QwenClient
+
+QwenClient -> ContextProtocol : add_new_transcript_to_context(text, _global_to_be_processed_turns, _llm_context)
+activate ContextProtocol
+
+' 分支1: 添加用户文本到待处理区
+note right of ContextProtocol #lightgreen
+  创建ExpandedTurn并添加到缓冲区
+end note
+ContextProtocol -> ContextProtocol : 创建新的ExpandedTurn并添加到缓冲区
+
+' 并行处理三个任务
+ContextProtocol -> ContextProtocol : 创建三个并行异步任务
+activate ContextProtocol #FFBBBB
+
+' 分支1: STD判断
+ContextProtocol -> ContextProtocol : is_ended_by_std(_global_to_be_processed_turns, _llm_context)
+note right of ContextProtocol #lightblue
+  判断用户是否结束说话
+  (当前简易实现总是返回True)
+end note
+
+' 分支2: 指令识别
+ContextProtocol -> ContextProtocol : instruction_recognition(_global_to_be_processed_turns, _llm_context)
+note right of ContextProtocol #lightblue
+  1. 获取最后一轮未处理的信息
+  2. 并行调用记忆检索和全局状态更新
+  3. 添加记忆并更新系统状态
+end note
+
+' 分支2的子任务
+ContextProtocol -> ContextProtocol : add_retrieved_memories_to_context_by_instruction(to_be_processed_turn)
+ContextProtocol -> ContextProtocol : get_global_status(llm_context.system_context)
+
+' 分支3: 被动记忆添加
+ContextProtocol -> ContextProtocol : add_retrieved_memories_to_context(_global_to_be_processed_turns.all_transcripts_in_current_turn[-1])
+note right of ContextProtocol #lightblue
+  根据当前用户输入添加相关记忆
+end note
+
+deactivate ContextProtocol
+
+' 判断STD结果
+ContextProtocol -> ContextProtocol : 判断STD结果
+
+alt STD结果为True: 处理并清空缓冲区
+  note right of ContextProtocol #palegreen
+    如果STD认为用户结束了，则处理缓冲区并构造消息
+  end note
+  
+  alt 缓冲区有多个回合
+    ContextProtocol -> ContextProtocol : 创建MultipleExpandedTurns并添加到_llm_context
+  else 缓冲区只有一个回合
+    ContextProtocol -> ContextProtocol : 直接添加ExpandedTurn到_llm_context
+  end
+  
+  ContextProtocol -> ContextProtocol : 清空缓冲区
+else STD结果为False: 保持缓冲区不变
+  note right of ContextProtocol #salmon
+    如果STD认为用户未结束，则保持缓冲区不变
+    [TODO] 需要添加最长逻辑，避免上下文暴增
+  end note
+end
+
+deactivate ContextProtocol
+
+' 回到主流程
+QwenClient -> ContextModels : _llm_context.format_for_llm()
+activate ContextModels
+note right of ContextModels #lightgreen
+  转换所有上下文为LLM可接受的格式：
+  1. 添加系统提示
+  2. 格式化对话历史
+  3. 添加最新系统上下文
+end note
+ContextModels --> QwenClient : 格式化后的消息列表
+deactivate ContextModels
+
+QwenClient -> API : send_request_async(messages, "qwen-turbo-latest")
+activate API
+API --> QwenClient : LLM响应
+deactivate API
+
+QwenClient -> QwenClient : 创建AgentResponseTurn并添加到_llm_context
+
+QwenClient --> User : 返回LLM响应
+deactivate QwenClient
+
+' 图例说明
+legend right
+  **图例说明**
+  <b>绿色背景</b>: 数据转换和处理
+  <b>蓝色背景</b>: 功能性操作
+  <b>红色背景</b>: 并行处理
+  <b>浅绿背景</b>: 成功流程
+  <b>浅红背景</b>: 需要注意的地方
+end legend
+
+@enduml 
