@@ -4,8 +4,8 @@ from .schema import CommandType, CommandResult, ACTION_TYPE_MAPPING
 from .config import (
     # CONTROL_COMMANDS, 
     TTS_CONFIG_COMMANDS, 
-    MEMORY_COMMANDS,
-    MULTIMODAL_COMMANDS, 
+    MEMORY_MULTI_COMMANDS,
+    # MULTIMODAL_COMMANDS, 
     PREFERENCE_COMMANDS,
     RULE_MIN_CONFIDENCE
 )
@@ -151,43 +151,47 @@ class RuleBasedDetector:
         
     def _detect_memory(self, text: str) -> Optional[CommandResult]:
         """检测记忆类命令"""
-        for action, keywords in MEMORY_COMMANDS.items():
-            for keyword in keywords:
-                if keyword in text:
-                    confidence = self._calculate_confidence(text, keyword)
-                    
-                    # 提取可能的查询内容
-                    params = {}
-                    if action == "query_memory":
-                        query_content = self._extract_query_content(text, keyword)
-                        if query_content:
-                            params["query"] = query_content
-                    
-                    return CommandResult(
-                        command_type=CommandType.MEMORY,
-                        action=action,
-                        params=params,
-                        confidence=confidence
-                    )
+        for action, keywords in MEMORY_MULTI_COMMANDS.items():
+            # 只处理记忆相关的命令
+            if action in ["query_memory", "delete_memory", "save_memory"]:
+                for keyword in keywords:
+                    if keyword in text:
+                        confidence = self._calculate_confidence(text, keyword)
+                        
+                        # 提取可能的查询内容
+                        params = {}
+                        if action == "query_memory":
+                            query_content = self._extract_query_content(text, keyword)
+                            if query_content:
+                                params["query"] = query_content
+                        
+                        return CommandResult(
+                            command_type=CommandType.MEMORY_MULTI,
+                            action=action,
+                            params=params,
+                            confidence=confidence
+                        )
         return None
         
     def _detect_multimodal(self, text: str) -> Optional[CommandResult]:
         """检测多模态类命令"""
-        for action, keywords in MULTIMODAL_COMMANDS.items():
-            for keyword in keywords:
-                if keyword in text:
-                    confidence = self._calculate_confidence(text, keyword)
-                    
-                    # 检测可能的多媒体类型
-                    media_type = self._detect_media_type(text)
-                    params = {"media_type": media_type} if media_type else {}
-                    
-                    return CommandResult(
-                        command_type=CommandType.MULTIMODAL,
-                        action=action,
-                        params=params,
-                        confidence=confidence
-                    )
+        for action, keywords in MEMORY_MULTI_COMMANDS.items():
+            # 只处理多模态相关的命令
+            if action in ["trigger_vision", "trigger_audio"]:
+                for keyword in keywords:
+                    if keyword in text:
+                        confidence = self._calculate_confidence(text, keyword)
+                        
+                        # 检测可能的多媒体类型
+                        media_type = self._detect_media_type(text)
+                        params = {"media_type": media_type} if media_type else {}
+                        
+                        return CommandResult(
+                            command_type=CommandType.MEMORY_MULTI,
+                            action=action,
+                            params=params,
+                            confidence=confidence
+                        )
         return None
         
     def _detect_preference(self, text: str) -> Optional[CommandResult]:
@@ -209,6 +213,19 @@ class RuleBasedDetector:
                             if param_confidence > max_confidence:
                                 max_confidence = param_confidence
                                 params = param_value
+                                
+                                # 如果是回复风格，添加关键字以便于保存到记忆
+                                if action == "set_response_style":
+                                    params["style_keyword"] = param_key
+                                # 如果是知识领域，添加关键字以便于保存到记忆
+                                elif action == "set_knowledge_domain":
+                                    params["domain_keyword"] = param_key
+                                # 如果是性格特点，添加关键字以便于保存到记忆
+                                elif action == "set_personality":
+                                    params["personality_keyword"] = param_key
+                                # 如果是格式偏好，添加关键字以便于保存到记忆
+                                elif action == "set_format_preference":
+                                    params["format_keyword"] = param_key
                     
                     # 如果找到参数，则返回结果
                     if params:

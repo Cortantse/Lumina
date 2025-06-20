@@ -37,6 +37,9 @@ class TTSConfigAction(Enum):
 class PreferenceAction(Enum):
     """偏好设置类动作枚举"""
     SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格
+    SET_KNOWLEDGE_DOMAIN = "set_knowledge_domain"  # 设置知识领域偏好
+    SET_PERSONALITY = "set_personality"  # 设置性格特点偏好
+    SET_FORMAT_PREFERENCE = "set_format_preference"  # 设置格式偏好
 
 
 class CommandResult:
@@ -87,4 +90,7 @@ ACTION_TYPE_MAPPING = {
     
     # 偏好设置类
     PreferenceAction.SET_RESPONSE_STYLE.value: CommandType.PREFERENCE,
+    PreferenceAction.SET_KNOWLEDGE_DOMAIN.value: CommandType.PREFERENCE,
+    PreferenceAction.SET_PERSONALITY.value: CommandType.PREFERENCE,
+    PreferenceAction.SET_FORMAT_PREFERENCE.value: CommandType.PREFERENCE,
 }

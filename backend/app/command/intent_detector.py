@@ -4,7 +4,7 @@ import os
 import time
 from typing import Dict, List, Any, Optional, Tuple, Union
 from app.utils.request import send_request_async
-from app.command.config import INTENT_DETECTION_SYSTEM_PROMPTS
+from .config import INTENT_DETECTION_SYSTEM_PROMPTS
 
 class IntentDetector:
     """通过通义千问意图检测模型进行意图识别"""
@@ -13,7 +13,40 @@ class IntentDetector:
         """初始化意图检测器"""
         self.model = "tongyi-intent-detect-v3"
         self._previous_messages = []
+        self.time_stats = {}  # 用于记录时间统计信息
         print(f"【调试】[IntentDetector] 初始化意图检测器，使用模型: {self.model}")
+    
+    def get_time_stats(self):
+        """
+        获取时间统计信息
+        
+        Returns:
+            各方法的时间统计字典
+        """
+        return self.time_stats
+    
+    def print_time_stats(self):
+        """
+        打印所有方法的时间统计信息
+        """
+        print("\n【时间统计】IntentDetector 方法调用时间统计:")
+        print("=" * 50)
+        
+        for method, stats in self.time_stats.items():
+            print(f"\n方法: {method}")
+            print("-" * 30)
+            
+            for step, duration in stats.items():
+                if step != "出错":
+                    print(f"{step}: {duration:.4f}秒")
+                else:
+                    print(f"{step}: {duration}")
+            
+            if "总耗时" in stats and "API请求" in stats:
+                api_percent = (stats["API请求"] / stats["总耗时"]) * 100
+                print(f"API请求占比: {api_percent:.2f}%")
+                
+        print("=" * 50)
     
     async def detect_intent_and_tool_call(self, user_query: str, tools: List[Dict], previous_messages: List[Dict] = None) -> Dict:
         """
@@ -81,9 +114,14 @@ class IntentDetector:
         Returns:
             识别出的意图标识
         """
+        method_name = "detect_intent_only"
         start_time = time.time()
+        time_details = {}
+        
         print(f"【调试】[IntentDetector] 开始仅检测意图，用户查询: '{user_query[:30]}...'")
         
+        # 记录准备阶段时间
+        prep_start = time.time()
         intent_string = json.dumps(intent_dict, ensure_ascii=False)
         
         system_prompt = INTENT_DETECTION_SYSTEM_PROMPTS["intent_only"].format(intent_string=intent_string)
@@ -104,22 +142,40 @@ class IntentDetector:
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
-        # self._previous_messages.append({"role": "user", "content": user_query})
-        # print(f"【调试】[IntentDetector] 将用户查询添加到对话历史")
+        
+        time_details["准备阶段"] = time.time() - prep_start
         
         try:
             print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
+            
+            # 记录API请求时间
+            api_start = time.time()
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
-            # self._previous_messages.append({"role": "assistant", "content": response})
+            time_details["API请求"] = time.time() - api_start
             
             print(f"【调试】[IntentDetector] 收到意图识别响应: {response}")
             print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
-            elapsed_time = time.time() - start_time
-            print(f"【调试】[IntentDetector] 意图识别完成，耗时: {elapsed_time:.2f}秒, 结果: {response}")
+            # 记录总时间
+            total_time = time.time() - start_time
+            time_details["总耗时"] = total_time
+            
+            # 保存时间统计信息
+            self.time_stats[method_name] = time_details
+            
+            print(f"【调试】[IntentDetector] 意图识别完成，耗时: {total_time:.2f}秒, 结果: {response}")
+            print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
             return response
         except Exception as e:
+            # 记录总时间和错误情况
+            total_time = time.time() - start_time
+            time_details["总耗时"] = total_time
+            time_details["出错"] = str(e)
+            self.time_stats[method_name] = time_details
+            
             print(f"【错误】[IntentDetector] 意图检测出错: {e}")
+            print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
+            print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
             return ""
     
     async def detect_tool_call_only(self, user_query: str, tools: List[Dict], previous_messages: List[Dict] = None) -> Dict:
@@ -188,9 +244,27 @@ class IntentDetector:
         Returns:
             识别出的意图标识（单字符）
         """
+        method_name = "detect_fast_intent"
+        start_time = time.time()
+        time_details = {}
+        
         print(f"【调试】[IntentDetector] 开始快速意图检测，用户查询: '{user_query[:30]}...'")
+        
+        # 记录调用detect_intent_only的时间
+        intent_start = time.time()
         result = await self.detect_intent_only(user_query, intent_dict, previous_messages)
+        time_details["意图检测"] = time.time() - intent_start
+        
+        # 记录总时间
+        total_time = time.time() - start_time
+        time_details["总耗时"] = total_time
+        
+        # 保存时间统计信息
+        self.time_stats[method_name] = time_details
+        
         print(f"【调试】[IntentDetector] 快速意图检测结果: {result}")
+        print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
+        print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
         return result
     
     def clear_history(self):

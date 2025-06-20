@@ -1,14 +1,15 @@
 import logging
 from typing import Dict, Any, Optional, List
+import asyncio
 
 from .schema import CommandType, CommandResult
-# from .rule_based import RuleBasedDetector
+from .rule_based import RuleBasedDetector
 # from .semantic_matcher import SemanticMatcher  # 导入语义匹配器
 from .memory_multi import MemoryMultiHandler
 from .tts_config import TTSConfigHandler
 from .preference import PreferenceHandler
 from .config import COMMAND_TOOLS, INTENT_DICT, FAST_INTENT_DICT
-from app.llm.intent_detector import IntentDetector  # 导入意图检测器
+from .intent_detector import IntentDetector  # 导入意图检测器
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class CommandDetector:
             llm_client: LLM客户端，用于LLM检测
         """
         # 初始化规则检测器
-        # self.rule_detector = RuleBasedDetector()
+        self.rule_detector = RuleBasedDetector()
         
         # # 初始化语义匹配器
         # self.semantic_matcher = SemanticMatcher()
@@ -58,10 +59,10 @@ class CommandDetector:
         
         # 快速意图到命令类型的映射
         self.fast_intent_to_command_type = {
-            "B": CommandType.MEMORY_MULTI,
-            "C": CommandType.TTS_CONFIG,
-            "E": CommandType.PREFERENCE,
-            "F": CommandType.NONE
+            "A": CommandType.MEMORY_MULTI,
+            "B": CommandType.TTS_CONFIG,
+            "C": CommandType.PREFERENCE,
+            "D": CommandType.NONE
         }
     
     def set_llm_client(self, llm_client):
@@ -251,17 +252,109 @@ class CommandDetector:
                             # 将style参数转换为tone参数，因为TTS处理器使用tone
                             params["tone"] = params.pop("style")
                 
-                # 创建命令结果
+                # 针对偏好设置进行特殊处理
+                elif command_type == CommandType.PREFERENCE:
+                    # 添加源信息，默认为用户
+                    if "source" not in params:
+                        params["source"] = "user"
+                        
+                    # 设置响应风格
+                    if action == "set_response_style" and "style" in params:
+                        style = params["style"]
+                        # 验证风格参数
+                        valid_styles = ["concise", "detailed", "formal", "casual", 
+                                       "professional", "friendly", "humorous", "serious", "plain"]
+                        if style not in valid_styles:
+                            print(f"【警告】响应风格'{style}'不是预定义的风格，将作为自定义风格处理")
+                        
+                    # 设置知识领域
+                    elif action == "set_knowledge_domain" and "domain" in params:
+                        domain = params["domain"]
+                        # 验证领域参数
+                        valid_domains = ["computer_science", "medicine", "law", "finance", 
+                                        "literature", "history", "science", "art", "education"]
+                        if domain not in valid_domains:
+                            print(f"【警告】知识领域'{domain}'不是预定义的领域，将作为自定义领域处理")
+                            
+                    # 设置性格特点
+                    elif action == "set_personality" and "personality" in params:
+                        personality = params["personality"]
+                        # 验证性格参数
+                        valid_personalities = ["logical", "emotional", "cautious", "bold", 
+                                              "innovative", "traditional", "lively", "steady"]
+                        if personality not in valid_personalities:
+                            print(f"【警告】性格特点'{personality}'不是预定义的特点，将作为自定义特点处理")
+                            
+                    # 设置格式偏好
+                    elif action == "set_format_preference" and "format" in params:
+                        format_type = params["format"]
+                        # 验证格式参数
+                        valid_formats = ["list", "table", "paragraph", "summary", 
+                                        "bullet_points", "comparison", "analysis", "steps"]
+                        if format_type not in valid_formats:
+                            print(f"【警告】格式偏好'{format_type}'不是预定义的格式，将作为自定义格式处理")
+                
+                # 针对记忆多模态操作进行特殊处理
+                elif command_type == CommandType.MEMORY_MULTI:
+                    # 查询记忆
+                    if action == "query_memory":
+                        if "query" not in params:
+                            print(f"【警告】查询记忆操作缺少必要参数'query'")
+                            return None
+                        # 设置默认限制数量
+                        if "limit" not in params:
+                            params["limit"] = 5
+                        elif isinstance(params["limit"], str):
+                            try:
+                                params["limit"] = int(params["limit"])
+                            except ValueError:
+                                params["limit"] = 5
+                                print(f"【警告】查询限制参数无效，使用默认值5")
+                    
+                    # 删除记忆
+                    elif action == "delete_memory":
+                        # 至少需要一个删除条件
+                        if not any(key in params for key in ["memory_id", "query", "document_id"]):
+                            print(f"【警告】删除记忆操作缺少必要参数，需要提供'memory_id'、'query'或'document_id'中的一个")
+                            return None
+                    
+                    # 保存记忆
+                    elif action == "save_memory":
+                        # 内容参数处理
+                        if "content" not in params and "last_message" not in params:
+                            print(f"【提示】保存记忆操作未提供具体内容，将尝试保存最近的对话")
+                        # 设置默认记忆类型
+                        if "type" not in params:
+                            params["type"] = "text"
+                    
+                    # 视觉分析
+                    elif action == "trigger_vision":
+                        # 处理图像路径
+                        if "image_path" not in params:
+                            print(f"【警告】视觉分析操作未提供图像路径，将尝试使用最近的图像")
+                    
+                    # 音频分析
+                    elif action == "trigger_audio":
+                        # 处理音频路径
+                        if "audio_path" not in params:
+                            print(f"【警告】音频分析操作未提供音频路径，将尝试使用最近的音频")
+                        # 设置默认模式
+                        if "mode" not in params:
+                            params["mode"] = "general"
+                        elif params["mode"] not in ["general", "transcribe", "identify"]:
+                            print(f"【警告】音频分析模式'{params['mode']}'不是有效的模式，使用默认'general'")
+                            params["mode"] = "general"
+                
                 return CommandResult(
                     command_type=command_type,
                     action=action,
                     params=params,
-                    confidence=0.8  # 设置较高的置信度
+                    confidence=1.0  # LLM调用的指令，置信度设为1.0
                 )
             
             return None
         except Exception as e:
-            logger.error(f"Error creating command result from tool: {str(e)}")
+            print(f"【异常】从工具调用创建命令结果时出错: {str(e)}")
             return None
     
     def _merge_command_results(self, command_results: List[CommandResult]) -> CommandResult:
@@ -545,3 +638,50 @@ class CommandDetector:
             
         # 将回调注册到pipeline服务
         pipeline_service.register_text_callback(command_callback)
+
+    def create_global_analyzer(self, memory_client=None, tts_client=None, vision_client=None, audio_client=None):
+        """
+        创建全局命令分析器，并设置各种客户端
+        
+        Args:
+            memory_client: 记忆客户端
+            tts_client: TTS客户端
+            vision_client: 视觉处理客户端
+            audio_client: 音频处理客户端
+            
+        Returns:
+            全局命令分析器
+        """
+        from .global_analyzer import GlobalCommandAnalyzer
+        
+        # 获取各类处理器
+        memory_multi_handler = self.handler_map.get(CommandType.MEMORY_MULTI)
+        tts_config_handler = self.handler_map.get(CommandType.TTS_CONFIG)
+        preference_handler = self.handler_map.get(CommandType.PREFERENCE)
+        
+        # 设置记忆客户端
+        if memory_client:
+            if memory_multi_handler:
+                memory_multi_handler.set_memory_client(memory_client)
+            if preference_handler:
+                preference_handler.set_memory_client(memory_client)
+        
+        # 设置TTS客户端
+        if tts_client and tts_config_handler:
+            tts_config_handler.set_tts_client(tts_client)
+        
+        # 设置视觉和音频客户端
+        if memory_multi_handler:
+            if vision_client:
+                memory_multi_handler.set_vision_client(vision_client)
+            if audio_client:
+                memory_multi_handler.set_audio_client(audio_client)
+        
+        # 创建全局分析器
+        analyzer = GlobalCommandAnalyzer(
+            memory_multi_handler=memory_multi_handler,
+            tts_config_handler=tts_config_handler,
+            preference_handler=preference_handler
+        )
+        
+        return analyzer

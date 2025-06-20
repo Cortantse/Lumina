@@ -12,6 +12,8 @@ from .memory_multi import MemoryMultiHandler
 from .tts_config import TTSConfigHandler
 from .preference import PreferenceHandler
 from .global_analyzer import GlobalCommandAnalyzer
+from .rule_based import RuleBasedDetector
+from .intent_detector import IntentDetector
 
 __all__ = [
     'CommandDetector',
@@ -25,4 +27,6 @@ __all__ = [
     'TTSConfigHandler',
     'PreferenceHandler',
     'GlobalCommandAnalyzer',
+    'RuleBasedDetector',
+    'IntentDetector',
 ]
