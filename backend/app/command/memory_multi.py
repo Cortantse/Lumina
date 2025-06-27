@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 
-from .schema import CommandResult, MemoryAction
+from .schema import CommandResult, MemoryAction, CommandExecutor
 from ..protocols.memory import MemoryManager, MemoryType
 from ..memory.store import get_memory_manager
 from ..memory.embeddings import get_embedding_service
@@ -553,4 +553,125 @@ class MemoryMultiHandler:
             
         except Exception as e:
             logger.error(f"Error getting recent audio: {str(e)}", exc_info=True)
-            return None 
+            return None
+
+class MemoryMultiExecutor(CommandExecutor):
+    """记忆和多模态命令执行器，实现CommandExecutor接口"""
+    
+    def __init__(self):
+        """初始化记忆和多模态命令执行器"""
+        self.handler = MemoryMultiHandler()
+        self.memory_client = None
+    
+    def set_memory_client(self, memory_client):
+        """设置记忆客户端"""
+        self.handler.set_memory_client(memory_client)
+        self.memory_client = memory_client
+    
+    def set_vision_client(self, vision_client):
+        """设置视觉处理客户端"""
+        self.handler.set_vision_client(vision_client)
+    
+    def set_audio_client(self, audio_client):
+        """设置音频处理客户端"""
+        self.handler.set_audio_client(audio_client)
+    
+    async def execute(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        执行记忆和多模态命令
+        
+        Args:
+            command_result: 命令结果对象
+            
+        Returns:
+            执行结果
+        """
+        # 使用处理器执行命令
+        if hasattr(self.handler, 'handle_async'):
+            result = await self.handler.handle_async(command_result)
+        else:
+            result = await asyncio.to_thread(self.handler.handle, command_result)
+        
+        # 将命令执行结果存储到记忆中
+        await self.store_to_memory(command_result, result)
+        
+        return result
+    
+    async def store_to_memory(self, command_result: CommandResult, execution_result: Dict[str, Any]) -> None:
+        """
+        将记忆操作记录存储到记忆系统中
+        对于查询操作，一般不需要存储，但对于删除和保存操作，应该记录下来
+        
+        Args:
+            command_result: 命令结果对象
+            execution_result: 执行结果
+            
+        Returns:
+            None
+        """
+        # 如果执行失败或没有设置记忆客户端，则不存储
+        if not execution_result.get("success", False) or not self.memory_client:
+            return
+        
+        try:
+            action = command_result.action
+            
+            # 只记录保存和删除记忆的操作
+            if action in [MemoryAction.SAVE_MEMORY.value, MemoryAction.DELETE_MEMORY.value]:
+                # 生成记忆内容
+                if action == MemoryAction.SAVE_MEMORY.value:
+                    content = command_result.params.get("content", "")
+                    content_preview = content[:30] + "..." if len(content) > 30 else content
+                    memory_content = f"用户保存了记忆: {content_preview}"
+                elif action == MemoryAction.DELETE_MEMORY.value:
+                    memory_id = command_result.params.get("memory_id", "")
+                    query = command_result.params.get("query", "")
+                    document_id = command_result.params.get("document_id", "")
+                    
+                    if memory_id:
+                        memory_content = f"用户删除了记忆ID: {memory_id}"
+                    elif document_id:
+                        memory_content = f"用户删除了文档ID: {document_id}"
+                    elif query:
+                        memory_content = f"用户删除了匹配查询的记忆: {query}"
+                    else:
+                        memory_content = f"用户执行了记忆删除操作"
+                        
+                # 存储到记忆系统中
+                if memory_content:
+                    await self.memory_client.store(
+                        original_text=memory_content,
+                        mem_type=MemoryType.SYSTEM,  # 使用系统类型，因为这是记录操作不是偏好
+                        metadata={
+                            "source": "memory_operation",
+                            "auto_stored": "true",
+                            "action": action
+                        }
+                    )
+                    print(f"【处理记忆操作命令】已将记忆操作记录存储到记忆系统: {memory_content}")
+                    
+            # 记录多模态触发操作
+            elif action in [MemoryAction.TRIGGER_VISION.value, MemoryAction.TRIGGER_AUDIO.value]:
+                if action == MemoryAction.TRIGGER_VISION.value:
+                    image_path = command_result.params.get("image_path", "未知")
+                    memory_content = f"用户触发了视觉分析，图像路径: {image_path}"
+                elif action == MemoryAction.TRIGGER_AUDIO.value:
+                    audio_path = command_result.params.get("audio_path", "未知")
+                    mode = command_result.params.get("mode", "general")
+                    memory_content = f"用户触发了音频分析，模式: {mode}，音频路径: {audio_path}"
+                
+                # 存储到记忆系统中
+                if memory_content:
+                    await self.memory_client.store(
+                        original_text=memory_content,
+                        mem_type=MemoryType.SYSTEM,
+                        metadata={
+                            "source": "multimodal_operation",
+                            "auto_stored": "true",
+                            "action": action
+                        }
+                    )
+                    print(f"【处理多模态命令】已将多模态操作记录存储到记忆系统: {memory_content}")
+                
+        except Exception as e:
+            print(f"【错误】[MemoryMultiExecutor] 存储记忆操作记录出错: {str(e)}") 

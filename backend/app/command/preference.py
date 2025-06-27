@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from .schema import CommandResult, PreferenceAction
+from .schema import CommandResult, PreferenceAction, CommandExecutor
 from ..protocols.memory import MemoryType
 from ..memory.store import get_memory_manager
 
@@ -39,6 +39,52 @@ class PreferenceHandler:
     def set_memory_client(self, memory_client):
         """设置记忆客户端"""
         self.memory_client = memory_client
+    
+    async def _summarize_preference(self, text: str) -> str:
+        """
+        使用大模型总结用户的偏好命令
+        
+        Args:
+            text: 用户的偏好输入
+            
+        Returns:
+            总结后的偏好内容
+        """
+        try:
+            print(f"【调试】[PreferenceHandler] 开始总结偏好命令")
+            
+            # 构建提示词
+            prompt = f"""请识别并总结以下文本中表达的用户偏好。
+提取关键点，保持简洁明了，使用第三人称。
+不要添加任何不在原文中的解释或建议。
+===
+{text}
+===
+"""
+            
+            from app.utils.request import send_request_async
+            
+            # 构建消息
+            messages = [
+                {"role": "system", "content": "你是一个专注于提取用户偏好和设置的AI助手。你的任务是识别并总结用户表达的偏好。"},
+                {"role": "user", "content": prompt}
+            ]
+            
+            # 发送请求到模型
+            response, _, _ = await send_request_async(messages, "qwen-max-2025-01-25")
+            
+            # 检查结果
+            if not response or len(response) < 10:
+                print(f"【警告】[PreferenceHandler] 偏好总结结果太短或为空，将使用原文")
+                return text
+                
+            print(f"【调试】[PreferenceHandler] 偏好总结完成: {response[:100]}...")
+            return response
+            
+        except Exception as e:
+            print(f"【错误】[PreferenceHandler] 偏好总结出错: {str(e)}")
+            # 出错时返回原文
+            return text
     
     async def ensure_memory_client(self):
         """确保记忆客户端已初始化"""
@@ -446,3 +492,141 @@ class PreferenceHandler:
         }
         
         return format_descriptions.get(format_type, format_type)
+
+class PreferenceExecutor(CommandExecutor):
+    """偏好设置执行器，实现CommandExecutor接口"""
+    
+    def __init__(self):
+        """初始化偏好设置执行器"""
+        self.handler = PreferenceHandler()
+        self.memory_client = None
+        
+    def set_preference_manager(self, preference_manager):
+        """设置偏好管理器"""
+        if hasattr(self.handler, 'set_preference_manager'):
+            self.handler.set_preference_manager(preference_manager)
+    
+    def set_memory_client(self, memory_client):
+        """设置记忆客户端"""
+        self.memory_client = memory_client
+    
+    async def execute(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        执行偏好设置命令
+        
+        Args:
+            command_result: 命令结果对象
+            
+        Returns:
+            执行结果
+        """
+        # 处理偏好记忆动作 - 特殊处理
+        if command_result.action == "preference_memory":
+            print(f"【调试】[PreferenceExecutor] 处理偏好记忆动作")
+            content = command_result.params.get("content", "")
+            
+            # 存储到记忆中
+            await self.store_to_memory(command_result, {"success": True})
+            
+            return {
+                "success": True, 
+                "message": f"已将偏好内容存储到记忆系统", 
+                "preference_content": content[:50] + "..." if len(content) > 50 else content
+            }
+        
+        # 使用处理器执行命令
+        if hasattr(self.handler, 'handle_async'):
+            result = await self.handler.handle_async(command_result)
+        else:
+            result = await asyncio.to_thread(self.handler.handle, command_result)
+        
+        # 将命令执行结果存储到记忆中
+        await self.store_to_memory(command_result, result)
+        
+        return result
+    
+    async def store_to_memory(self, command_result: CommandResult, execution_result: Dict[str, Any]) -> None:
+        """
+        将偏好设置存储到记忆系统中
+        
+        Args:
+            command_result: 命令结果对象
+            execution_result: 执行结果
+            
+        Returns:
+            None
+        """
+        # 对于偏好记忆，可能已经在detect_command中处理过了，这里避免重复处理
+        if command_result.action == "preference_memory":
+            # 检查是否已经有处理标记
+            if command_result.params.get("memory_stored"):
+                return
+                
+            content = command_result.params.get("content", "")
+            original = command_result.params.get("original", "")
+            
+            try:
+                # 存储到记忆系统中
+                if self.memory_client and content:
+                    await self.memory_client.store(
+                        original_text=content,
+                        mem_type=MemoryType.PREFERENCE,
+                        metadata={
+                            "source": "user",
+                            "auto_stored": "true",
+                            "original_text": original[:200] + "..." if len(original) > 200 else original
+                        }
+                    )
+                    # 标记为已存储
+                    command_result.params["memory_stored"] = True
+                    print(f"【处理偏好记忆】已将偏好内容存储到记忆系统: {content}")
+            except Exception as e:
+                print(f"【错误】[PreferenceExecutor] 存储偏好记忆到记忆系统出错: {str(e)}")
+        
+        # 其他偏好设置命令
+        elif self.memory_client and execution_result.get("success", False):
+            try:
+                action = command_result.action
+                params = command_result.params
+                
+                # 生成记忆内容
+                memory_content = ""
+                
+                # 设置响应风格
+                if action == "set_response_style" and "style" in params:
+                    style = params["style"]
+                    memory_content = f"用户设置了回答风格为: {style}"
+                
+                # 设置知识领域
+                elif action == "set_knowledge_domain" and "domain" in params:
+                    domain = params["domain"]
+                    memory_content = f"用户设置了知识领域为: {domain}"
+                
+                # 设置性格特点
+                elif action == "set_personality" and "personality" in params:
+                    personality = params["personality"]
+                    memory_content = f"用户设置了性格特点为: {personality}"
+                
+                # 设置格式偏好
+                elif action == "set_format_preference" and "format" in params:
+                    format_type = params["format"]
+                    memory_content = f"用户设置了回答格式偏好为: {format_type}"
+                
+                # 其他偏好设置
+                else:
+                    memory_content = f"用户设置了偏好: {action} {str(params)}"
+                
+                # 存储到记忆系统中
+                if memory_content:
+                    await self.memory_client.store(
+                        original_text=memory_content,
+                        mem_type=MemoryType.PREFERENCE,
+                        metadata={
+                            "source": "preference_command",
+                            "auto_stored": "true",
+                            "action": action
+                        }
+                    )
+                    print(f"【处理偏好设置命令】已将偏好设置存储到记忆系统: {memory_content}")
+            except Exception as e:
+                print(f"【错误】[PreferenceExecutor] 存储偏好设置到记忆系统出错: {str(e)}")

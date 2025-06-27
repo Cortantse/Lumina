@@ -215,49 +215,17 @@ COMMAND_TOOLS = [
     },
     {
         "name": "preference_command",
-        "description": "偏好设置类命令，如输出风格、知识领域、性格特点、格式偏好等",
+        "description": "表达用户偏好或个性化信息的输入，包含明确设定和隐含倾向",
         "parameters": {
             "type": "object",
             "properties": {
-                "action": {
-                    "type": "string",
-                    "description": "设置动作，如set_response_style(设置回复风格), set_knowledge_domain(设置知识领域), set_personality(设置性格特点), set_format_preference(设置格式偏好)",
-                    "default": ""
-                },
                 "params": {
                     "type": "object",
-                    "description": "设置参数，包含不同类型的具体设置值",
-                    "properties": {
-                        "style": {
-                            "type": "string",
-                            "description": "回复风格，如concise(简短), detailed(详细), formal(正式), casual(随意), professional(专业), friendly(友好), humorous(幽默), serious(严肃), plain(通俗)等",
-                            "default": ""
-                        },
-                        "domain": {
-                            "type": "string",
-                            "description": "知识领域，如computer_science(计算机), medicine(医学), law(法律), finance(金融), literature(文学), history(历史), science(科学), art(艺术), education(教育)等",
-                            "default": ""
-                        },
-                        "personality": {
-                            "type": "string",
-                            "description": "性格特点，如logical(理性), emotional(感性), cautious(谨慎), bold(大胆), innovative(创新), traditional(传统), lively(活泼), steady(沉稳)等",
-                            "default": ""
-                        },
-                        "format": {
-                            "type": "string",
-                            "description": "格式偏好，如list(列表), table(表格), paragraph(段落), summary(摘要), bullet_points(要点), comparison(比较), analysis(分析), steps(步骤)等",
-                            "default": ""
-                        },
-                        "source": {
-                            "type": "string",
-                            "description": "偏好来源，记录偏好的来源，默认为user",
-                            "default": "user"
-                        }
-                    },
+                    "description": "原本文本",
                     "default": {}
-                }
+                },
             },
-            "required": ["action", "params"]
+            "required": ["params"]
         }
     }
 ]
@@ -274,7 +242,7 @@ INTENT_DICT = {
 FAST_INTENT_DICT = {
     "A": "记忆操作和多模态触发类指令",
     "B": "TTS配置类指令",
-    "C": "偏好设置类指令",
+    "C": "表达用户偏好或个性化信息的输入，包含明确设定和隐含倾向",
     "D": "非命令输入"
 }
 

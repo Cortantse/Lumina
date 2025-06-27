@@ -72,14 +72,14 @@ class IntentDetector:
         ]
         
         # 使用传入的previous_messages或者实例的_previous_messages
-        if previous_messages:
-            messages.extend(previous_messages)
-            print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
-        elif self._previous_messages:
-            messages.extend(self._previous_messages)
-            print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
-        else:
-            print(f"【调试】[IntentDetector] 没有使用对话历史")
+        # if previous_messages:
+        #     messages.extend(previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        # elif self._previous_messages:
+        #     messages.extend(self._previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        # else:
+        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
@@ -131,14 +131,14 @@ class IntentDetector:
         ]
         
         # 使用传入的previous_messages或者实例的_previous_messages
-        if previous_messages:
-            messages.extend(previous_messages)
-            print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
-        elif self._previous_messages:
-            messages.extend(self._previous_messages)
-            print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
-        else:
-            print(f"【调试】[IntentDetector] 没有使用对话历史")
+        # if previous_messages:
+        #     messages.extend(previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        # elif self._previous_messages:
+        #     messages.extend(self._previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        # else:
+        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
@@ -202,14 +202,14 @@ class IntentDetector:
         ]
         
         # 使用传入的previous_messages或者实例的_previous_messages
-        if previous_messages:
-            messages.extend(previous_messages)
-            print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
-        elif self._previous_messages:
-            messages.extend(self._previous_messages)
-            print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
-        else:
-            print(f"【调试】[IntentDetector] 没有使用对话历史")
+        # if previous_messages:
+        #     messages.extend(previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        # elif self._previous_messages:
+        #     messages.extend(self._previous_messages)
+        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        # else:
+        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})

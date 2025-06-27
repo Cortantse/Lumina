@@ -5,10 +5,9 @@ import asyncio
 
 from app.protocols.stt import AudioData, STTResponse, STTClient
 from app.protocols.stt import create_alicloud_stt_client
-from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion
+from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion, get_tts_client
 from app.tts.send_tts import send_tts_audio_stream
 # 初始化并注册命令检测器
-from app.command.detector import CommandDetector
 from app.memory.store import get_memory_manager
 
 
@@ -38,8 +37,9 @@ class PipelineService:
         self.last_response_text = ""  # 用于存储上一次处理过的识别文本，避免重复处理
         self.last_response_id = ""  # 用于存储上一次处理过的识别结果ID
         
-        # 初始化TTS客户端
-        self.tts_client = MiniMaxTTSClient(tts_api_key)
+        # 初始化TTS客户端（异步初始化，但在start方法中确保已完成）
+        self.tts_client = None
+        self.tts_api_key = tts_api_key
         self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
         
         # TTS播放控制
@@ -50,14 +50,6 @@ class PipelineService:
         # 初始化记忆客户端
         self.memory_client = None
         
-        self.command_detector = CommandDetector()
-        self.command_detector.set_tts_client(self.tts_client)
-        # 先设置为None，在start方法中异步初始化
-        self.command_detector.set_memory_client(self.memory_client)
-        # self.command_detector.set_vision_client(self.vision_client)
-        # self.command_detector.set_audio_client(self.audio_client)
-        # self.command_detector.set_preference_manager(self.preference_manager)
-        self.command_detector.register_text_callback(self)
         # print("【调试】PipelineService初始化完成")
         
     def register_text_callback(self, callback: Callable[[str, bool], Any]) -> None:
@@ -86,6 +78,16 @@ class PipelineService:
             except Exception as e:
                 print(f"【错误】初始化记忆客户端失败: {e}")
     
+    async def init_tts_client(self) -> None:
+        """异步初始化TTS客户端"""
+        if not self.tts_client:
+            try:
+                print("【调试】正在获取全局TTS客户端实例")
+                self.tts_client = await get_tts_client(self.tts_api_key)
+                print("【调试】获取TTS客户端成功")
+            except Exception as e:
+                print(f"【错误】获取TTS客户端失败: {e}")
+    
     def start(self) -> None:
         """启动Pipeline服务
         
@@ -94,8 +96,9 @@ class PipelineService:
         self.running = True
         # print("【调试】Pipeline服务已启动")
         
-        # 异步初始化记忆客户端
+        # 异步初始化记忆客户端和TTS客户端
         asyncio.create_task(self.init_memory_client())
+        asyncio.create_task(self.init_tts_client())
         
         # 启动TTS监控任务，检查STT缓冲区
         if not self.tts_monitor_task:
@@ -217,6 +220,10 @@ class PipelineService:
         """
         # print("【调试】开始监控STT缓冲区")
         
+        # 确保TTS客户端已初始化
+        if not self.tts_client:
+            await self.init_tts_client()
+        
         while self.running:
             try:
                 # 如果当前没有在播放TTS，检查缓冲区是否有内容
@@ -231,20 +238,12 @@ class PipelineService:
                         # print(f"【调试】合并后的文本: '{text}'")
                         
                         # 异步处理命令
-                        asyncio.create_task(self.command_detector.process(text))
+                        # asyncio.create_task(self.command_detector.process(text))
                         # command_task = asyncio.create_task(self.command_detector.process(text))
                         
                         # 清空缓冲区  
                         cleared_count = await self.stt_client.clear_sentence_buffer()
-                        # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")
-
-                        # 检查命令处理结果
-                        # command_result = await command_task
-                        # if command_result.get("is_command", False):
-                        #     print(f"执行命令: {command_result.get('message', '')}")
-
-                        # 播放TTS
-                        self.tts_playing = True
+                        # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")                        
 
                         from app.llm.qwen_client import simple_send_request_to_llm
 
@@ -254,6 +253,8 @@ class PipelineService:
                         if not text:
                             continue
 
+                        # 播放TTS
+                        self.tts_playing = True
                         # 获取音频流并发送到前端
                         audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
                         await send_tts_audio_stream(audio_stream)

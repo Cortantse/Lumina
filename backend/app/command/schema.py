@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from typing import Dict, Any, Optional
+import abc
 
 
 class CommandType(Enum):
@@ -94,3 +95,34 @@ ACTION_TYPE_MAPPING = {
     PreferenceAction.SET_PERSONALITY.value: CommandType.PREFERENCE,
     PreferenceAction.SET_FORMAT_PREFERENCE.value: CommandType.PREFERENCE,
 }
+
+
+# 命令执行器接口
+class CommandExecutor(abc.ABC):
+    """命令执行器接口，所有具体的命令执行器都应实现这个接口"""
+    
+    @abc.abstractmethod
+    async def execute(self, command_result: CommandResult) -> Dict[str, Any]:
+        """
+        执行命令
+        
+        Args:
+            command_result: 命令结果对象
+            
+        Returns:
+            执行结果的字典
+        """
+        pass
+    
+    async def store_to_memory(self, command_result: CommandResult, execution_result: Dict[str, Any]) -> None:
+        """
+        将命令执行结果存储到记忆系统中
+        
+        Args:
+            command_result: 命令结果对象
+            execution_result: 执行结果
+            
+        Returns:
+            None
+        """
+        pass

@@ -220,7 +220,7 @@ class AliCloudSTTAdapter(STTClient):
                         "max_end_silence": config.max_end_silence
                     }
                 )
-                print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
+                # print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
             except Exception as exc:  # 使用不同的变量名避免闭包问题
                 # 如果启动失败，通过Future通知等待的协程
                 print(f"【错误】线程内: 启动识别会话失败: {exc}")

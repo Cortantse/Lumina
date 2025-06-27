@@ -82,7 +82,7 @@ class RuleBasedDetector:
     def _detect_tts_config(self, text: str) -> Optional[CommandResult]:
         """检测TTS配置类命令"""
         # 特殊处理：直接检测是否提到了特定音色名称
-        print(f"【调试】text-tts_config: {text}")
+        # print(f"【调试】text-tts_config: {text}")
         if "切換音色" in text or "修改声音" in text or "切换声音" in text or "更换声音" in text or "使用音色" in text:
             voice_name = self._extract_voice_name(text)
             print(f"【调试】voice_name: {voice_name}")
