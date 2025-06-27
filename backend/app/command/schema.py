@@ -33,6 +33,9 @@ class TTSConfigAction(Enum):
     SET_VOICE = "set_voice"           # 设置音色
     SET_STYLE = "set_style"           # 设置语气风格
     SET_SPEED = "set_speed"           # 设置语速
+    SET_MULTIPLE = "set_multiple"     # 设置多个TTS参数
+    SET_VOLUME = "set_volume"         # 设置音量
+    SET_PITCH = "set_pitch"           # 设置音调
 
 
 class PreferenceAction(Enum):
@@ -88,6 +91,10 @@ ACTION_TYPE_MAPPING = {
     TTSConfigAction.SET_VOICE.value: CommandType.TTS_CONFIG,
     TTSConfigAction.SET_STYLE.value: CommandType.TTS_CONFIG,
     TTSConfigAction.SET_SPEED.value: CommandType.TTS_CONFIG,
+    TTSConfigAction.SET_MULTIPLE.value: CommandType.TTS_CONFIG,
+    TTSConfigAction.SET_VOLUME.value: CommandType.TTS_CONFIG,
+    TTSConfigAction.SET_PITCH.value: CommandType.TTS_CONFIG,
+    "set_multiple": CommandType.TTS_CONFIG,  # 兼容字符串形式的多参数设置
     
     # 偏好设置类
     PreferenceAction.SET_RESPONSE_STYLE.value: CommandType.PREFERENCE,

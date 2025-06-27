@@ -70,11 +70,6 @@ class PipelineService:
             try:
                 print("【调试】正在异步初始化记忆客户端")
                 self.memory_client = await get_memory_manager()
-                if self.memory_client:
-                    self.command_detector.set_memory_client(self.memory_client)
-                    print("【调试】记忆客户端初始化成功")
-                else:
-                    print("【警告】记忆客户端初始化失败")
             except Exception as e:
                 print(f"【错误】初始化记忆客户端失败: {e}")
     
