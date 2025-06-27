@@ -55,6 +55,10 @@ class CommandDetector(Protocol):
         """设置偏好设置管理器"""
         ...
     
+    async def ensure_tts_client(self) -> bool:
+        """确保TTS客户端已初始化，如未初始化则获取全局实例"""
+        ...
+    
     async def detect_command(self, text: str) -> CommandResult:
         """
         异步检测文本中是否包含命令
@@ -155,24 +159,68 @@ class TTSConfigHandler(Protocol):
         """设置TTS客户端"""
         ...
     
+    async def ensure_tts_client(self) -> bool:
+        """确保TTS客户端已初始化，如未初始化则获取全局实例"""
+        ...
+    
+    def ensure_tts_client_sync(self) -> bool:
+        """同步方法确保TTS客户端已初始化"""
+        ...
+    
     def handle(self, command_result: CommandResult) -> Dict[str, Any]:
         """处理TTS配置命令"""
+        ...
+    
+    async def handle_async(self, command_result: CommandResult) -> Dict[str, Any]:
+        """异步处理TTS配置命令"""
         ...
     
     def handle_set_voice(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """处理设置音色的命令"""
         ...
     
+    async def handle_set_voice_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理设置音色的命令"""
+        ...
+    
     def handle_set_style(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """处理设置语气风格的命令"""
+        ...
+    
+    async def handle_set_style_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理设置语气风格的命令"""
         ...
     
     def handle_set_speed(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """处理设置语速的命令"""
         ...
     
+    async def handle_set_speed_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理设置语速的命令"""
+        ...
+    
+    def handle_set_volume(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理设置音量的命令"""
+        ...
+    
+    async def handle_set_volume_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理设置音量的命令"""
+        ...
+    
+    def handle_set_pitch(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理设置音调的命令"""
+        ...
+    
+    async def handle_set_pitch_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理设置音调的命令"""
+        ...
+    
     def handle_multiple_settings(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """处理多个TTS设置操作"""
+        ...
+    
+    async def handle_multiple_settings_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """异步处理多个TTS设置操作"""
         ...
 
 
@@ -207,4 +255,7 @@ class TTSConfigAction(Enum):
 
 class PreferenceAction(Enum):
     """偏好设置类动作枚举"""
-    SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格 
+    SET_RESPONSE_STYLE = "set_response_style"   # 设置回复风格
+    SET_KNOWLEDGE_DOMAIN = "set_knowledge_domain"  # 设置知识领域偏好
+    SET_PERSONALITY = "set_personality"  # 设置性格特点偏好
+    SET_FORMAT_PREFERENCE = "set_format_preference"  # 设置格式偏好 
