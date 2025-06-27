@@ -92,7 +92,7 @@ class CommandDetector:
             intent = await self.intent_detector.detect_fast_intent(text, self.fast_intent_dict)
             if intent and intent in self.fast_intent_to_command_type:
                 command_type = self.fast_intent_to_command_type[intent]
-                print(f"【调试】command_type: {command_type}")
+                # print(f"【调试】command_type: {command_type}")
                 if command_type != CommandType.NONE:
                     # print(f"Intent detector found command type: {command_type}")
                     

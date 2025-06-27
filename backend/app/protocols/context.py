@@ -84,44 +84,6 @@ async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) 
     # 5. 将去重后的唯一记忆添加到上下文中
     to_be_processed_turn.retrieved_memories.extend(unique_memories.values())
 
-
-# --- 接口：指令识别 ---- #
-# [TODO] 浩斌在这里可以进行指令识别和添加你想添加的内容到上下文，但注意不要在这里写实际逻辑，调用你的模块的函数
-async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext) -> None:
-    """
-    进行指令识别，从而获取 相关记忆 和 新的全局状态
-
-    args:
-        to_be_processed_turns: 目前为止所有待处理的转录文本轮，即缓冲区未被提供给 llm 的转录文本以及多模态信息
-        llm_context: 当前的所有上下文，不包括 to_be_processed_turns 中的，
-                     只有最终 to_be_processed_turns 中的转录文本会被 加入到 llm_context 中并提供给 llm 处理
-    """
-    # 浩斌应该对未处理文本的 **当前轮**的 信息进行处理，并添加到 **当前轮** 的上下文，即 to_be_processed_turns[-1]
-    # 但是我这里提供了所有未处理的转录文本和所有历史上下文，浩斌可以作为相关上下文，也可以不使用
-
-    # 获取最后一轮未被处理的信息
-    to_be_processed_turn = to_be_processed_turns.all_transcripts_in_current_turn[-1]
-    print(f"【调试】进行指令识别，当前转录文本: {to_be_processed_turn.transcript}")
-    
-    # 获取待处理转录文本
-    transcript = to_be_processed_turn.transcript
-    
-    # 创建任务但现在不等待
-    instruction_searched_memories_task = asyncio.create_task(
-        add_retrieved_memories_to_context_by_instruction(to_be_processed_turn)
-    )
-    new_system_context = asyncio.create_task(
-        get_global_status(llm_context.system_context, to_be_processed_turn)
-    )
-
-    # 一起等待两者
-    results = await asyncio.gather(instruction_searched_memories_task, new_system_context)
-
-    # 这里直接加入记忆和替换系统状态
-    to_be_processed_turn.retrieved_memories.extend(results[0])
-    llm_context.system_context = results[1]
-
-
 async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn: ExpandedTurn) -> List[Memory]:
     """
     添加高度相关记忆到上下文，主动根据指令添加
@@ -139,7 +101,7 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
     
     # 检测可能的命令
     command_result = await command_detector.detect_command(transcript)
-    print(f"【调试】command_result: {command_result}")
+    # print(f"【调试】command_result: {command_result}")
     
     # 准备空的记忆列表
     memories = []
@@ -227,6 +189,43 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
         print(f"全局状态分析出错: {str(e)}")
     
     return system_context
+
+
+# --- 接口：指令识别 ---- #
+# [TODO] 浩斌在这里可以进行指令识别和添加你想添加的内容到上下文，但注意不要在这里写实际逻辑，调用你的模块的函数
+async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext) -> None:
+    """
+    进行指令识别，从而获取 相关记忆 和 新的全局状态
+
+    args:
+        to_be_processed_turns: 目前为止所有待处理的转录文本轮，即缓冲区未被提供给 llm 的转录文本以及多模态信息
+        llm_context: 当前的所有上下文，不包括 to_be_processed_turns 中的，
+                     只有最终 to_be_processed_turns 中的转录文本会被 加入到 llm_context 中并提供给 llm 处理
+    """
+    # 浩斌应该对未处理文本的 **当前轮**的 信息进行处理，并添加到 **当前轮** 的上下文，即 to_be_processed_turns[-1]
+    # 但是我这里提供了所有未处理的转录文本和所有历史上下文，浩斌可以作为相关上下文，也可以不使用
+
+    # 获取最后一轮未被处理的信息
+    to_be_processed_turn = to_be_processed_turns.all_transcripts_in_current_turn[-1]
+    # print(f"【调试】进行指令识别，当前转录文本: {to_be_processed_turn.transcript}")
+    
+    # 获取待处理转录文本
+    transcript = to_be_processed_turn.transcript
+    
+    # 创建任务但现在不等待
+    instruction_searched_memories_task = asyncio.create_task(
+        add_retrieved_memories_to_context_by_instruction(to_be_processed_turn)
+    )
+    new_system_context = asyncio.create_task(
+        get_global_status(llm_context.system_context, to_be_processed_turn)
+    )
+
+    # 一起等待两者
+    results = await asyncio.gather(instruction_searched_memories_task, new_system_context)
+
+    # 这里直接加入记忆和替换系统状态
+    to_be_processed_turn.retrieved_memories.extend(results[0])
+    llm_context.system_context = results[1]
 
 
 # ---- 添加内容到待处理区  ----

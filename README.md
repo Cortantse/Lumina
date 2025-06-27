@@ -56,6 +56,21 @@ lumina/
 │   │   │       ├── multimodal.py     # /image, /event 等接口 (placeholder)
 │   │   │       └── control.py        # 控制消息：end_of_segment, cancel
 │   │   │
+│   │   ├── command/                  # 命令检测和处理
+│   │   │   ├── __init__.py           # 模块初始化文件
+│   │   │   ├── config.py             # 命令配置，关键词映射
+│   │   │   ├── detector.py           # 命令检测器定义
+│   │   │   ├── executor.py           # 命令执行器基类
+│   │   │   ├── global_analyzer.py    # 全局分析器
+│   │   │   ├── intent_detector.py    # LLM意图检测器
+│   │   │   ├── manager.py            # 命令管理器，统一入口
+│   │   │   ├── memory_multi.py       # 记忆与多模态命令处理
+│   │   │   ├── preference.py         # 用户偏好命令处理
+│   │   │   ├── rule_based.py         # 规则检测器
+│   │   │   ├── schema.py             # 命令数据模型定义
+│   │   │   ├── tts_config.py         # TTS配置命令处理
+│   │   │   └── tests/                # 命令模块测试
+│   │   │
 │   │   ├── core/                     # 全局配置、初始化、监控
 │   │   │   ├── config.py             # 读取 env、参数
 │   │   │   ├── logging.py            # 结构化日志 (placeholder)
