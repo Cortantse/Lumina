@@ -1,0 +1,36 @@
+@startuml
+title 记忆检索 (Retrieve) 算法流程
+
+start
+:<b>[embeddings.py]</b>
+向量化查询字符串;
+:<b>[FAISS]</b>
+在FAISS索引中搜索
+k * multiplier个候选结果;
+:创建空的 parent_candidates 字典;
+while (遍历每个候选结果)
+  :从 self.memories 获取 Memory 对象;
+  if (应用过滤器后被筛掉?) then (yes)
+    :跳过;
+  else (no)
+    :获取相似度分数;
+    if (命中的是子文档?) then (yes)
+      :获取其 parent_id;
+    else (no)
+      :使用其自身的 vector_id;
+    endif
+    :更新 parent_candidates 字典，
+    保留父文档的最高分;
+  endif
+endwhile
+
+:对 parent_candidates 中的父文档
+进行自定义排序;
+note left
+  <b>多重排序逻辑:</b>
+  1. 如果 score > 阈值，按时间戳降序
+  2. 否则，按 score 降序
+end note
+:返回排序后的前 N 个结果;
+stop
+@enduml 

@@ -1,0 +1,74 @@
+@startuml
+!theme vibrant
+title Lumina 记忆系统 - 数据结构
+
+package "Protocols (memory.py)" <<Frame>> {
+  enum MemoryType {
+    TEXT
+    COMMAND
+    PREFERENCE
+    KNOWLEDGE
+    INTERNAL
+  }
+
+  class Memory {
+    + vector_id: str
+    + original_text: str
+    + type: MemoryType
+    + timestamp: datetime
+    + metadata: Dict[str, Any]
+    --
+    <size:10><i>// metadata examples:</i></size>
+    <size:10><i>// {"is_parent": "True"}</i></size>
+    <size:10><i>// {"is_parent": "False", "parent_id": "...", "child_type": "summary"}</i></size>
+  }
+}
+
+package "Storage & Logic" <<Node>> {
+  class "<b>FAISSMemoryStore</b>\n(store.py)" as Store {
+    - memories: Dict[str, Memory]
+    - index: faiss.IndexIDMap
+    - index_to_id: List[str]
+    - embedding_service: EmbeddingService
+    - text_splitter: RecursiveCharacterTextSplitter
+    --
+    + store(text, type, ...)
+    + retrieve(query, limit, ...)
+    + clear()
+    + get(vector_id)
+  }
+}
+
+package "Services" <<Cloud>> {
+    class "<b>EmbeddingService</b>\n(embeddings.py)" as EmbeddingService {
+        - _model: SentenceTransformer | OpenAI
+        - embedding_cache: Dict[str, np.ndarray]
+        - vector_dim: int
+        --
+        + embed_text(texts)
+    }
+
+    class "<b>enhancer.py</b>" as Enhancer {
+        .. Functions ..
+        + generate_tags_for_text(text)
+        + generate_summaries_for_text(text)
+    }
+
+    class "<b>RecursiveCharacterTextSplitter</b>\n(text_splitter.py)" as TextSplitter {
+        - chunk_size: int
+        - chunk_overlap: int
+        - separators: List[str]
+        --
+        + split_text(text)
+    }
+}
+
+
+Store "1" *-- "1" EmbeddingService : uses >
+Store "1" *-- "1" TextSplitter : uses >
+Store "1" *-- "many" Memory : stores in 'memories' dict >
+Store ..> Enhancer : calls
+
+Memory *-- MemoryType
+
+@enduml 
