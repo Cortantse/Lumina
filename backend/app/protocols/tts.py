@@ -3,8 +3,9 @@ import websockets
 import json
 import ssl
 import asyncio
+import re
 
-from typing import Protocol, AsyncIterator, Dict, Any, Optional
+from typing import Protocol, AsyncIterator, Dict, Any, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
 
@@ -19,6 +20,7 @@ __all__ = [
     "MiniMaxTTSClient", 
     "ALLOWED_VOICE_IDS",
     "DEFAULT_VOICE_ID",
+    "extract_emotion_from_text",
     "get_tts_client"
 ]
 
@@ -39,6 +41,7 @@ async def get_tts_client(api_key: Optional[str] = None) -> "MiniMaxTTSClient":
     global _tts_client_instance
     if _tts_client_instance is None:
         _tts_client_instance = MiniMaxTTSClient(api_key)
+        await _tts_client_instance.initialize()
         print("【TTS】创建全局TTS客户端实例")
     return _tts_client_instance
 
@@ -52,6 +55,46 @@ class TTSApiEmotion(Enum):
     SURPRISED = "surprised"
     DISGUSTED = "disgusted"
 
+# 从文本中提取情绪标注的函数
+def extract_emotion_from_text(text: str) -> Tuple[str, TTSApiEmotion]:
+    """
+    从文本中提取情绪标注，并返回清理后的文本和对应的情绪枚举
+    
+    Args:
+        text: 可能包含情绪标注的文本
+        
+    Returns:
+        Tuple[str, TTSApiEmotion]: 清理后的文本和对应的情绪枚举
+    """
+    # 默认情绪为中性
+    emotion = TTSApiEmotion.NEUTRAL
+    
+    # 匹配情绪标记模式 [EMOTION]
+    pattern = r'^\s*\[(NEUTRAL|HAPPY|SAD|ANGRY|FEARFUL|DISGUSTED|SURPRISED)\]\s*'
+    match = re.search(pattern, text)
+    
+    if match:
+        emotion_str = match.group(1)
+        # 移除情绪标记
+        cleaned_text = re.sub(pattern, '', text, 1).strip()
+        
+        # 映射到对应的情绪枚举
+        emotion_map = {
+            "NEUTRAL": TTSApiEmotion.NEUTRAL,
+            "HAPPY": TTSApiEmotion.HAPPY,
+            "SAD": TTSApiEmotion.SAD,
+            "ANGRY": TTSApiEmotion.ANGRY,
+            "FEARFUL": TTSApiEmotion.FEARFUL,
+            "DISGUSTED": TTSApiEmotion.DISGUSTED,
+            "SURPRISED": TTSApiEmotion.SURPRISED
+        }
+        emotion = emotion_map.get(emotion_str, TTSApiEmotion.NEUTRAL)
+        
+        print(f"【TTS】从文本中提取到情绪标记: {emotion_str}, 对应枚举: {emotion.value}")
+        return cleaned_text, emotion
+    
+    # 没有找到情绪标记，返回原文本和默认情绪
+    return text, emotion
 
 # 支持流式传输和播放的数据结构
 @dataclass
@@ -71,7 +114,7 @@ class TTSClient(Protocol):
     """
     async def send_tts_request(
         self,
-        api_emotion: TTSApiEmotion,
+        api_emotion: Optional[TTSApiEmotion],
         text: str,
         voice_id: Optional[str] = None,
         speed: Optional[float] = None,
@@ -162,9 +205,23 @@ class MiniMaxTTSClient(TTSClient):
         self.default_speed = 1.0  # 范围[0.5,2]
         self.default_volume = 1.0  # 范围(0,10]
         self.default_pitch = 0  # 范围[-12,12]
+        self.default_emotion = TTSApiEmotion.NEUTRAL  # 默认情绪为中性
         
         # 记忆客户端，延迟初始化
         self.memory_client = None
+        # 初始化时不立即存储配置，移到异步initialize方法中
+
+    async def initialize(self) -> None:
+        """异步初始化方法，用于存储TTS初始配置到记忆系统"""
+        # 初始化记忆客户端
+        await self._ensure_memory_client()
+        
+        # 存储默认配置到记忆系统
+        await self._store_tts_config_to_memory("voice", "默认音色")
+        await self._store_tts_config_to_memory("speed", 1.0)
+        await self._store_tts_config_to_memory("volume", 1.0)
+        await self._store_tts_config_to_memory("pitch", 0)
+        print("【TTS】初始配置已存储到记忆系统")
 
     async def _ensure_memory_client(self):
         """确保记忆客户端已初始化"""
@@ -238,6 +295,12 @@ class MiniMaxTTSClient(TTSClient):
         else:
             self.default_voice_id = voice_id
             await self._store_tts_config_to_memory("voice", voice_id, display_name)
+    
+    async def set_emotion(self, emotion: TTSApiEmotion) -> None:
+        """设置默认情绪并保存到记忆中"""
+        self.default_emotion = emotion
+        # await self._store_tts_config_to_memory("emotion", emotion.value, emotion.name)
+        print(f"【TTS】设置默认情绪为: {emotion.name} ({emotion.value})")
         
     async def set_speed(self, speed: float) -> None:
         """设置默认语速并保存到记忆中"""
@@ -311,6 +374,11 @@ class MiniMaxTTSClient(TTSClient):
                         "changes_count": len(changes)
                     }
                 )
+    
+    # 添加情绪处理的同步方法
+    def set_emotion_sync(self, emotion: TTSApiEmotion) -> None:
+        """同步版的设置默认情绪"""
+        self.default_emotion = emotion
 
     # 后面的方法保持不变
     def set_voice_sync(self, voice_id: str) -> None:
@@ -458,7 +526,7 @@ class MiniMaxTTSClient(TTSClient):
 
     async def send_tts_request(
         self,
-        api_emotion: TTSApiEmotion,
+        api_emotion: Optional[TTSApiEmotion],
         text: str,
         voice_id: Optional[str] = None,
         speed: Optional[float] = None,
@@ -474,13 +542,28 @@ class MiniMaxTTSClient(TTSClient):
         5. 收到 is_final=True 时退出，关闭 WebSocket 连接
         
         Args:
-            api_emotion: 情绪枚举值
+            api_emotion: 情绪枚举值，如果为None则尝试从文本中提取情绪或使用默认情绪
             text: 要转换为语音的文本
             voice_id: 语音ID，如果为None则使用默认值
             speed: 语速，范围[0.5,2]，如果为None则使用默认值
             volume: 音量，范围(0,10]，如果为None则使用默认值
             pitch: 音调，范围[-12,12]，如果为None则使用默认值
         """
+        # 如果传入的情绪为None，尝试从文本中提取情绪
+        if api_emotion is None:
+            cleaned_text, extracted_emotion = extract_emotion_from_text(text)
+            text = cleaned_text
+            api_emotion = extracted_emotion
+        else:
+            # 使用传入的情绪，但仍需检查文本是否包含情绪标记
+            if text.strip().startswith("["):
+                cleaned_text, _ = extract_emotion_from_text(text)
+                text = cleaned_text
+        
+        # 如果情绪仍然为None(理论上不应该，前面已处理)，使用默认情绪
+        if api_emotion is None:
+            api_emotion = self.default_emotion
+            print(f"【TTS】使用默认情绪: {api_emotion.name}")
 
         ws = await self._establish_connection()
         if ws is None:

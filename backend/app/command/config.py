@@ -158,7 +158,7 @@ RULE_MIN_CONFIDENCE = 0.7
 COMMAND_TOOLS = [
     {
         "name": "memory_multi_command",
-        "description": "记忆操作和多模态触发命令，如查询记忆、分析图像等",
+        "description": "记忆操作和多模态触发命令。用户询问TTS音色等配置（如“当前音色是什么”“现在的语速是多少”“系统用的是什么音色”等）也应命中，查询当前系统TTS配置。凡是涉及回忆、记忆、历史内容、偏好、习惯、知识点、过往对话、用户信息、自动保存、查询、删除、分析、总结、归档、检索、提取、回顾、追溯、查找、获取、保存、更新、管理等与记忆相关的需求，均应命中本工具。包括但不限于：查询记忆、保存记忆、删除记忆、分析图像、分析音频、自动归档、历史内容检索、用户偏好回忆、知识点回顾等。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -177,8 +177,60 @@ COMMAND_TOOLS = [
         }
     },
     {
+        "name": "preference_command",
+        "description": "表达用户偏好或个性化信息的输入，包含明确设定和隐含倾向",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "设置动作，如set_response_style(设置回复风格), set_knowledge_domain(设置知识领域), set_personality(设置性格特点), set_format_preference(设置格式偏好)",
+                    "default": ""
+                },
+                "params": {
+                    "type": "object",
+                    "description": "设置参数，包含不同类型的具体设置值",
+                    "properties": {
+                        "style": {
+                            "type": "string",
+                            "description": "原始输入文本",
+                            "default": ""
+                        },
+                        "style": {
+                            "type": "string",
+                            "description": "回复风格，如concise(简短), detailed(详细), formal(正式), casual(随意), professional(专业), friendly(友好), humorous(幽默), serious(严肃), plain(通俗)等",
+                            "default": ""
+                        },
+                        "domain": {
+                            "type": "string",
+                            "description": "知识领域，如computer_science(计算机), medicine(医学), law(法律), finance(金融), literature(文学), history(历史), science(科学), art(艺术), education(教育)等",
+                            "default": ""
+                        },
+                        "personality": {
+                            "type": "string",
+                            "description": "性格特点，如logical(理性), emotional(感性), cautious(谨慎), bold(大胆), innovative(创新), traditional(传统), lively(活泼), steady(沉稳)等",
+                            "default": ""
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": "格式偏好，如list(列表), table(表格), paragraph(段落), summary(摘要), bullet_points(要点), comparison(比较), analysis(分析), steps(步骤)等",
+                            "default": ""
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "偏好来源，记录偏好的来源，默认为user",
+                            "default": "user"
+                        }
+                    },
+                    "default": {}
+                }
+            },
+            "required": ["action", "params"]
+        }
+    },
+    {
         "name": "tts_config_command",
-        "description": "TTS配置类命令，如设置音色、语速等",
+        "description": "TTS配置类命令，仅当用户输入文本明确表达对TTS配置（如音色、语速等）有修改需求时才会被命中。仅涉及询问、回忆、查询当前TTS配置（如“当前音色是什么”“现在的语速是多少”等）不会命中本命令，只有涉及实际配置变更的指令才会生效。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -213,28 +265,13 @@ COMMAND_TOOLS = [
             "required": ["action", "params"]
         }
     },
-    {
-        "name": "preference_command",
-        "description": "表达用户偏好或个性化信息的输入，包含明确设定和隐含倾向",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "params": {
-                    "type": "object",
-                    "description": "原本文本",
-                    "default": {}
-                },
-            },
-            "required": ["params"]
-        }
-    }
 ]
 
 # 意图分类字典
 INTENT_DICT = {
     "memory_multi": "记忆操作和多模态触发类指令，如查询记忆、图像识别",
     "tts_config": "TTS配置类指令，如设置音色、语速等",
-    "preference": "偏好设置类指令，如输出风格",
+    "preference": "表达用户偏好或个性化信息的输入，包含明确设定和隐含倾向",
     "none": "非命令输入，普通对话"
 }
 

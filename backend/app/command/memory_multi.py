@@ -68,6 +68,7 @@ class MemoryMultiHandler:
         
         # 查找对应的处理函数
         handler = self.action_handlers.get(action)
+        # print(f"【调试】handler: {handler}")
         if handler:
             # 使用异步执行器来执行异步函数
             if asyncio.iscoroutinefunction(handler):
@@ -111,8 +112,9 @@ class MemoryMultiHandler:
                 return {"success": False, "message": "记忆客户端未设置或初始化失败，无法执行查询操作"}
             
             # 提取查询参数
-            query = params.get("query", "")
+            query = params.get("query", "") or params.get("memory_id", "") or params.get("document_id", "") or params.get("content", "") or params.get("image_path", "") or params.get("audio_path", "")
             if not query:
+                #print(f"【调试】[MemoryMultiHandler] 未提供查询内容, params: {params}")
                 return {"success": False, "message": "未提供查询内容"}
             
             # 提取可选参数
@@ -252,7 +254,7 @@ class MemoryMultiHandler:
             if not content and "last_message" in params:
                 # 如果没有明确的内容但有last_message参数，使用最后一条消息
                 content = params.get("last_message")
-            print(f"【调试】[MemoryMultiHandler] 保存记忆内容: {content}")
+            #print(f"【调试】[MemoryMultiHandler] 保存记忆内容: {content}")
                 
             if not content:
                 # 尝试从上下文中提取最近的对话内容
@@ -281,7 +283,7 @@ class MemoryMultiHandler:
                 mem_type=memory_type,
                 metadata=metadata
             )
-            print(f"【调试】[MemoryMultiHandler] 保存记忆完成: {memory}")
+            #print(f"【调试】[MemoryMultiHandler] 保存记忆完成: {memory}")
             
             return {
                 "success": True,
@@ -586,12 +588,14 @@ class MemoryMultiExecutor(CommandExecutor):
         Returns:
             执行结果
         """
+        #print(f"【调试】执行记忆和多模态命令: {command_result}")
         # 使用处理器执行命令
         if hasattr(self.handler, 'handle_async'):
             result = await self.handler.handle_async(command_result)
+            #print(f"【调试】执行记忆和多模态命令结果: {result}")
         else:
             result = await asyncio.to_thread(self.handler.handle, command_result)
-        
+            #print(f"【调试】执行记忆和多模态命令结果123: {result}")
         # 将命令执行结果存储到记忆中
         await self.store_to_memory(command_result, result)
         
@@ -648,7 +652,7 @@ class MemoryMultiExecutor(CommandExecutor):
                             "action": action
                         }
                     )
-                    print(f"【处理记忆操作命令】已将记忆操作记录存储到记忆系统: {memory_content}")
+                    #print(f"【处理记忆操作命令】已将记忆操作记录存储到记忆系统: {memory_content}")
                     
             # 记录多模态触发操作
             elif action in [MemoryAction.TRIGGER_VISION.value, MemoryAction.TRIGGER_AUDIO.value]:
@@ -671,7 +675,7 @@ class MemoryMultiExecutor(CommandExecutor):
                             "action": action
                         }
                     )
-                    print(f"【处理多模态命令】已将多模态操作记录存储到记忆系统: {memory_content}")
+                    #print(f"【处理多模态命令】已将多模态操作记录存储到记忆系统: {memory_content}")
                 
         except Exception as e:
             print(f"【错误】[MemoryMultiExecutor] 存储记忆操作记录出错: {str(e)}") 

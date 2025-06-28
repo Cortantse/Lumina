@@ -108,7 +108,7 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
     
     # 如果检测到了命令，根据命令类型处理
     if command_result and command_result.is_command():
-        print(f"【调试】检测到命令: {command_result.type}")
+        # print(f"【调试】检测到命令: {command_result.type}")
         
         # 使用工具调用获取详细命令
         command_tools_result = await command_detector.detect_command_with_tools(transcript)
@@ -120,10 +120,13 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
             if command_tools_result.type.value == "MEMORY_MULTI":
                 # 执行命令
                 execution_result = await executor_manager.execute_command(command_tools_result)
+                #print(f"【调试】执行命令结果: {execution_result}")
                 
                 # 如果是查询记忆相关的命令，将结果添加到记忆列表中
                 if command_tools_result.action == "query_memory" and execution_result.get("success", False):
+                    #print(f"【调试】查询记忆成功")
                     retrieved_memories = execution_result.get("memories", [])
+                    #print(f"【调试】查询记忆结果: {retrieved_memories}")
                     for memory_dict in retrieved_memories:
                         # 将字典格式的记忆转换为Memory对象
                         try:

@@ -131,8 +131,30 @@ class PreferenceHandler:
             else:
                 return handler(params)
         else:
+            # 使用异步运行总结偏好命令
+            summary = asyncio.run(self._summarize_preference(params))
+            print(f"【调试】[PreferenceHandler] 总结偏好命令: {summary}")
+            
+            # 将总结结果存储到记忆系统
+            store_result = False
+            if self.memory_client:
+                try:
+                    store_result = asyncio.run(self.store_preference(
+                        preference_type="general_preference",
+                        value=summary,
+                        metadata={"source": "auto_summary", "original": params[:100]}
+                    ))
+                    print(f"【调试】[PreferenceHandler] 将偏好总结存储到记忆: {'成功' if store_result else '失败'}")
+                except Exception as e:
+                    print(f"【错误】[PreferenceHandler] 存储偏好总结失败: {str(e)}")
+            
             logger.warning(f"Unknown preference action: {action}")
-            return {"success": False, "message": f"未知偏好设置命令: {action}"}
+            return {
+                "success": False, 
+                "message": f"未知偏好设置命令: {action}", 
+                "summary": summary,
+                "stored_in_memory": store_result
+            }
     
     async def store_preference(self, preference_type: str, value: Any, metadata: Optional[Dict[str, Any]] = None) -> bool:
         """

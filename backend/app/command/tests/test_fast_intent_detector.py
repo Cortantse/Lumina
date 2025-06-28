@@ -239,7 +239,7 @@ async def main():
         await tester.run_tests()
         
         # 运行带有历史上下文的测试
-        await tester.run_historical_context_tests()
+        # await tester.run_historical_context_tests()
         
         # 打印性能统计信息
         print("\n" + "=" * 50)

@@ -14,7 +14,7 @@ class IntentDetector:
         self.model = "tongyi-intent-detect-v3"
         self._previous_messages = []
         self.time_stats = {}  # 用于记录时间统计信息
-        print(f"【调试】[IntentDetector] 初始化意图检测器，使用模型: {self.model}")
+        #print(f"【调试】[IntentDetector] 初始化意图检测器，使用模型: {self.model}")
     
     def get_time_stats(self):
         """
@@ -61,7 +61,7 @@ class IntentDetector:
             包含tags、tool_call和content的字典
         """
         start_time = time.time()
-        print(f"【调试】[IntentDetector] 开始检测意图和函数调用，用户查询: '{user_query[:30]}...'")
+        #print(f"【调试】[IntentDetector] 开始检测意图和函数调用，用户查询: '{user_query[:30]}...'")
         
         tools_string = json.dumps(tools, ensure_ascii=False)
         
@@ -74,32 +74,32 @@ class IntentDetector:
         # 使用传入的previous_messages或者实例的_previous_messages
         # if previous_messages:
         #     messages.extend(previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
         # elif self._previous_messages:
         #     messages.extend(self._previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
         # else:
-        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
+        #     #print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
         # self._previous_messages.append({"role": "user", "content": user_query})
-        # print(f"【调试】[IntentDetector] 将用户查询添加到对话历史")
+        # #print(f"【调试】[IntentDetector] 将用户查询添加到对话历史")
 
         try:
-            # print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
+            # #print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
             # self._previous_messages.append({"role": "assistant", "content": response})
             
-            print(f"【调试】[IntentDetector] 收到意图检测响应: {response}")
-            # print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
+            #print(f"【调试】[IntentDetector] 收到意图检测响应: {response}")
+            # #print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
             result = self.parse_text(response)
             elapsed_time = time.time() - start_time
-            print(f"【调试】[IntentDetector] 意图检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
+            #print(f"【调试】[IntentDetector] 意图检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
             return result
         except Exception as e:
-            print(f"【错误】[IntentDetector] 意图检测出错: {e}")
+            #print(f"【错误】[IntentDetector] 意图检测出错: {e}")
             return {"tags": "", "tool_call": [], "content": ""}
     
     async def detect_intent_only(self, user_query: str, intent_dict: Dict[str, str], previous_messages: List[Dict] = None) -> str:
@@ -118,7 +118,7 @@ class IntentDetector:
         start_time = time.time()
         time_details = {}
         
-        print(f"【调试】[IntentDetector] 开始仅检测意图，用户查询: '{user_query[:30]}...'")
+        #print(f"【调试】[IntentDetector] 开始仅检测意图，用户查询: '{user_query[:30]}...'")
         
         # 记录准备阶段时间
         prep_start = time.time()
@@ -133,12 +133,12 @@ class IntentDetector:
         # 使用传入的previous_messages或者实例的_previous_messages
         # if previous_messages:
         #     messages.extend(previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
         # elif self._previous_messages:
         #     messages.extend(self._previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
         # else:
-        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
+        #     #print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
@@ -146,15 +146,15 @@ class IntentDetector:
         time_details["准备阶段"] = time.time() - prep_start
         
         try:
-            # print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
+            # #print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
             
             # 记录API请求时间
             api_start = time.time()
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
             time_details["API请求"] = time.time() - api_start
             
-            print(f"【调试】[IntentDetector] 收到意图识别响应: {response}")
-            # print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
+            #print(f"【调试】[IntentDetector] 收到意图识别响应: {response}")
+            # #print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
             # 记录总时间
             total_time = time.time() - start_time
@@ -163,8 +163,8 @@ class IntentDetector:
             # 保存时间统计信息
             self.time_stats[method_name] = time_details
             
-            print(f"【调试】[IntentDetector] 意图识别完成，耗时: {total_time:.2f}秒, 结果: {response}")
-            print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
+            #print(f"【调试】[IntentDetector] 意图识别完成，耗时: {total_time:.2f}秒, 结果: {response}")
+            #print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
             return response
         except Exception as e:
             # 记录总时间和错误情况
@@ -173,9 +173,9 @@ class IntentDetector:
             time_details["出错"] = str(e)
             self.time_stats[method_name] = time_details
             
-            print(f"【错误】[IntentDetector] 意图检测出错: {e}")
-            print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
-            print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
+            #print(f"【错误】[IntentDetector] 意图检测出错: {e}")
+            #print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
+            #print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
             return ""
     
     async def detect_tool_call_only(self, user_query: str, tools: List[Dict], previous_messages: List[Dict] = None) -> Dict:
@@ -191,7 +191,7 @@ class IntentDetector:
             解析后的函数调用信息
         """
         start_time = time.time()
-        # print(f"【调试】[IntentDetector] 开始仅检测工具调用，用户查询: '{user_query[:30]}...'")
+        # #print(f"【调试】[IntentDetector] 开始仅检测工具调用，用户查询: '{user_query[:30]}...'")
         
         tools_string = json.dumps(tools, ensure_ascii=False)
         
@@ -204,32 +204,32 @@ class IntentDetector:
         # 使用传入的previous_messages或者实例的_previous_messages
         # if previous_messages:
         #     messages.extend(previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用传入的对话历史，共{len(previous_messages)}条消息")
         # elif self._previous_messages:
         #     messages.extend(self._previous_messages)
-        #     print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
+        #     #print(f"【调试】[IntentDetector] 使用实例的对话历史，共{len(self._previous_messages)}条消息")
         # else:
-        #     print(f"【调试】[IntentDetector] 没有使用对话历史")
+        #     #print(f"【调试】[IntentDetector] 没有使用对话历史")
             
         # 添加当前用户查询
         messages.append({"role": "user", "content": user_query})
         # self._previous_messages.append({"role": "user", "content": user_query})
-        # print(f"【调试】[IntentDetector] 将用户查询添加到对话历史")
+        # #print(f"【调试】[IntentDetector] 将用户查询添加到对话历史")
         
         try:
-            # print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
+            # #print(f"【调试】[IntentDetector] 发送请求到模型，共{len(messages)}条消息")
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
             # self._previous_messages.append({"role": "assistant", "content": response})
             
-            print(f"【调试】[IntentDetector] 收到工具调用响应: {response}")
-            # print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
+            #print(f"【调试】[IntentDetector] 收到工具调用响应: {response}")
+            # #print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
             result = self.parse_tool_call(response)
             elapsed_time = time.time() - start_time
-            print(f"【调试】[IntentDetector] 工具调用检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
+            #print(f"【调试】[IntentDetector] 工具调用检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
             return result
         except Exception as e:
-            print(f"【错误】[IntentDetector] 函数调用检测出错: {e}")
+            #print(f"【错误】[IntentDetector] 函数调用检测出错: {e}")
             return {}
     
     async def detect_fast_intent(self, user_query: str, intent_dict: Dict[str, str], previous_messages: List[Dict] = None) -> str:
@@ -248,7 +248,7 @@ class IntentDetector:
         start_time = time.time()
         time_details = {}
         
-        print(f"【调试】[IntentDetector] 开始快速意图检测，用户查询: '{user_query[:30]}...'")
+        #print(f"【调试】[IntentDetector] 开始快速意图检测，用户查询: '{user_query[:30]}...'")
         
         # 记录调用detect_intent_only的时间
         intent_start = time.time()
@@ -262,9 +262,9 @@ class IntentDetector:
         # 保存时间统计信息
         self.time_stats[method_name] = time_details
         
-        print(f"【调试】[IntentDetector] 快速意图检测结果: {result}")
-        # print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
-        print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
+        #print(f"【调试】[IntentDetector] 快速意图检测结果: {result}")
+        # #print(f"【调试】[IntentDetector] 总耗时: {total_time:.2f}秒")
+        #print(f"【调试】[IntentDetector] 时间详细分布: {time_details}")
         return result
     
     def clear_history(self):
@@ -273,7 +273,7 @@ class IntentDetector:
         """
         previous_count = len(self._previous_messages)
         self._previous_messages = []
-        print(f"【调试】[IntentDetector] 清除对话历史，共清除{previous_count}条消息")
+        #print(f"【调试】[IntentDetector] 清除对话历史，共清除{previous_count}条消息")
     
     def parse_text(self, text: str) -> Dict:
         """
@@ -290,7 +290,7 @@ class IntentDetector:
         tool_call_pattern = r'<tool_call>(.*?)</tool_call>'
         content_pattern = r'<content>(.*?)</content>'
         
-        print(f"【调试】[IntentDetector] 开始解析文本: {text[:50]}...")
+        #print(f"【调试】[IntentDetector] 开始解析文本: {text[:50]}...")
         
         # 使用正则表达式查找匹配的内容
         tags_match = re.search(tags_pattern, text, re.DOTALL)
@@ -302,16 +302,16 @@ class IntentDetector:
         tool_call_text = tool_call_match.group(1).strip() if tool_call_match else ""
         content = content_match.group(1).strip() if content_match else ""
         
-        # print(f"【调试】[IntentDetector] 提取到的标签: {tags}")
-        # print(f"【调试】[IntentDetector] 提取到的工具调用文本: {tool_call_text[:50]}...")
-        # print(f"【调试】[IntentDetector] 提取到的内容: {content[:50]}...")
+        # #print(f"【调试】[IntentDetector] 提取到的标签: {tags}")
+        # #print(f"【调试】[IntentDetector] 提取到的工具调用文本: {tool_call_text[:50]}...")
+        # #print(f"【调试】[IntentDetector] 提取到的内容: {content[:50]}...")
         
         # 尝试将tool_call解析为JSON对象
         tool_call = []
         if tool_call_text:
             try:
                 tool_call = json.loads(tool_call_text)
-                # print(f"【调试】[IntentDetector] 成功解析工具调用JSON")
+                # #print(f"【调试】[IntentDetector] 成功解析工具调用JSON")
             except json.JSONDecodeError as e:
                 print(f"【错误】[IntentDetector] 无法解析tool_call JSON: {tool_call_text}, 错误: {e}")
         
@@ -322,7 +322,7 @@ class IntentDetector:
             "content": content
         }
         
-        # print(f"【调试】[IntentDetector] 解析完成，返回结果")
+        # #print(f"【调试】[IntentDetector] 解析完成，返回结果")
         return result
     
     def parse_tool_call(self, text: str) -> Dict:
@@ -337,7 +337,7 @@ class IntentDetector:
         """
         tool_call_pattern = r'<tool_call>(.*?)</tool_call>'
         
-        # print(f"【调试】[IntentDetector] 开始解析工具调用文本: {text[:50]}...")
+        # #print(f"【调试】[IntentDetector] 开始解析工具调用文本: {text[:50]}...")
         
         # 使用正则表达式查找匹配的内容
         tool_call_match = re.search(tool_call_pattern, text, re.DOTALL)
@@ -346,16 +346,16 @@ class IntentDetector:
         tool_call_text = tool_call_match.group(1).strip() if tool_call_match else ""
         
         if not tool_call_text:
-            print(f"【调试】[IntentDetector] 未找到工具调用标签")
+            #print(f"【调试】[IntentDetector] 未找到工具调用标签")
             return {}
             
-        # print(f"【调试】[IntentDetector] 提取到的工具调用文本: {tool_call_text[:50]}...")
+        # #print(f"【调试】[IntentDetector] 提取到的工具调用文本: {tool_call_text[:50]}...")
         
         # 尝试将tool_call解析为JSON对象
         if tool_call_text:
             try:
                 result = json.loads(tool_call_text)
-                # print(f"【调试】[IntentDetector] 成功解析工具调用JSON: {result}")
+                # #print(f"【调试】[IntentDetector] 成功解析工具调用JSON: {result}")
                 return result
             except json.JSONDecodeError as e:
                 print(f"【错误】[IntentDetector] 无法解析tool_call JSON: {tool_call_text}, 错误: {e}")
