@@ -68,7 +68,7 @@ def initialize_command_system():
     executor.executor_map[CommandType.PREFERENCE] = preference_executor
     
     # 打印初始化信息
-    print(f"【调试】命令系统已初始化，注册了以下执行器：{executor.executor_map}")
+    # print(f"【调试】命令系统已初始化，注册了以下执行器：{executor.executor_map}")
     
     return {
         "detector": detector,
