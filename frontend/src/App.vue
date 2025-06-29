@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import RealTimeVad from "./components/RealTimeVad.vue";
 import VadPlayback from "./components/VadPlayback.vue";
+import SystemAudioRecorder from "./components/SystemAudioRecorder.vue";
 
 const greetMsg = ref("");
 const name = ref("");
@@ -17,6 +18,14 @@ async function greet() {
 <template>
   <main class="container">
 
+    <div class="feature-section">
+      <SystemAudioRecorder />
+    </div>
+
+    <div class="feature-section">
+      <AudioPlayback />
+    </div>
+
     <!-- <div class="feature-section">
       <h2>实时 VAD (语音活动检测)</h2>
       <RealTimeVad />
@@ -26,10 +35,6 @@ async function greet() {
       <h2>VAD语音段回放</h2>
       <VadPlayback />
     </div> -->
-
-    <div class="feature-section">
-      <AudioPlayback />
-    </div>
 
     <div class="row logos">
       <a href="https://vitejs.dev" target="_blank">

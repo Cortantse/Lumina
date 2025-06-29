@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 from typing import List, Dict
 from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, SystemContext
 from app.models.image import ImageInput
-from app.protocols.memory import Memory
+from app.protocols.memory import Memory, MemoryType
 from app.memory.store import get_memory_manager
+from app.command.manager import get_command_detector, get_executor_manager
 
 """
 为了方便修改上下文，我们定义一个上下文修改协议，这个协议定义了如何修改上下文。
@@ -15,7 +16,6 @@ from app.memory.store import get_memory_manager
 2、上下文交给 std 来判断是否用户结束说话且轮到 agent 说话，同时，进行指令识别     
 3、当 std 认为结束了 且 指令识别等主导的记忆检索 结束后，即 context构造完后交给正式的语言模型进行处理
 """
-
 
 # ---- 首先包装一个数据结构，来管理目前为止所有待处理的转录文本  ----
 @dataclass
@@ -84,35 +84,117 @@ async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) 
     # 5. 将去重后的唯一记忆添加到上下文中
     to_be_processed_turn.retrieved_memories.extend(unique_memories.values())
 
-
 async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn: ExpandedTurn) -> List[Memory]:
     """
     添加高度相关记忆到上下文，主动根据指令添加
     """
-    # [TODO] 假设获得了对应的记忆，浩斌
+    # 从记忆库中获取与指令相关的记忆
+    memory_manager = await get_memory_manager()
+    transcript = to_be_processed_turn.transcript
+    
+    # 使用全局命令检测器和执行器
+    command_detector = get_command_detector()
+    executor_manager = get_executor_manager()
+    
+    # 设置记忆客户端给执行器
+    executor_manager.set_memory_client(memory_manager)
+    
+    # 检测可能的命令
+    command_result = await command_detector.detect_command(transcript)
+    # print(f"【调试】command_result: {command_result}")
+    
+    # 准备空的记忆列表
     memories = []
+    
+    # 如果检测到了命令，根据命令类型处理
+    if command_result and command_result.is_command():
+        # print(f"【调试】检测到命令: {command_result.type}")
+        
+        # 使用工具调用获取详细命令
+        command_tools_result = await command_detector.detect_command_with_tools(transcript)
+        
+        if command_tools_result:
+            print(f"【调试】命令工具识别结果: {command_tools_result}")
+            
+            # 处理记忆操作类命令
+            if command_tools_result.type.value == "MEMORY_MULTI":
+                # 执行命令
+                execution_result = await executor_manager.execute_command(command_tools_result)
+                #print(f"【调试】执行命令结果: {execution_result}")
+                
+                # 如果是查询记忆相关的命令，将结果添加到记忆列表中
+                if command_tools_result.action == "query_memory" and execution_result.get("success", False):
+                    #print(f"【调试】查询记忆成功")
+                    retrieved_memories = execution_result.get("memories", [])
+                    #print(f"【调试】查询记忆结果: {retrieved_memories}")
+                    for memory_dict in retrieved_memories:
+                        # 将字典格式的记忆转换为Memory对象
+                        try:
+                            # 创建基本的Memory对象
+                            memory = Memory(
+                                original_text=memory_dict.get("text", ""),
+                                vector_id=memory_dict.get("id", ""),
+                                metadata=memory_dict.get("metadata", {})
+                            )
+                            # 设置类型
+                            mem_type_str = memory_dict.get("type", "TEXT")
+                            memory.type = MemoryType(mem_type_str) if isinstance(mem_type_str, str) else mem_type_str
+                            
+                            memories.append(memory)
+                        except Exception as e:
+                            print(f"【错误】转换记忆字典到Memory对象失败: {str(e)}")
+            else:
+                # 对于其他类型命令，直接执行但不返回记忆
+                await executor_manager.execute_command(command_tools_result)
+    
     return memories
 
 
 # --- 接口：获得全局状态 --- #
-async def get_global_status(current_system_context: SystemContext) -> SystemContext:
+async def get_global_status(current_system_context: SystemContext, to_be_processed_turn: ExpandedTurn) -> SystemContext:
     """
     这里只给到之前的全局状态，由浩斌直接给出新的全局状态作为替换
     其它参数请自行获取
 
     args:
         current_system_context: 当前的全局状态
+        to_be_processed_turn: 当前待处理的转录文本
 
     returns:
         SystemContext: 全新的全局状态
     """
-    # [TODO] 假设获取了全局状态，浩斌
+    # 创建全局分析器
+    from app.command.global_analyzer import GlobalCommandAnalyzer
+    
+    # 初始化GlobalCommandAnalyzer
+    global_analyzer = GlobalCommandAnalyzer()
+    
+    # 创建新的系统上下文
     system_context = SystemContext()
-
+    
+    # 复制当前上下文的所有指令
+    for key, value in current_system_context.directives.items():
+        system_context.add(key, value)
+    
+    # 获取当前处理的转录文本
+    current_transcript = to_be_processed_turn.transcript
+    
+    try:
+        # 分析当前转录的情绪和关键内容
+        analysis_result = await global_analyzer.analyze_text(current_transcript)
+        
+        # 更新系统上下文中的情绪和关键内容
+        system_context.add("user_emotion", analysis_result["emotion"])
+        system_context.add("key_content", analysis_result["key_content"])
+        print(f"【调试】analysis_result: {analysis_result}")
+    except Exception as e:
+        # 出现错误时不更新情绪和关键内容
+        print(f"全局状态分析出错: {str(e)}")
+    
     return system_context
 
 
-# ---- 接口：指令识别 ---- #
+# --- 接口：指令识别 ---- #
 # [TODO] 浩斌在这里可以进行指令识别和添加你想添加的内容到上下文，但注意不要在这里写实际逻辑，调用你的模块的函数
 async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext) -> None:
     """
@@ -128,23 +210,25 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
 
     # 获取最后一轮未被处理的信息
     to_be_processed_turn = to_be_processed_turns.all_transcripts_in_current_turn[-1]
-
-    # [TODO] 根据指令跟随获取了 记忆 和 全局状态，这里全局状态是替换还是新增比较好??? 目前直接替换，但这里可能比较复杂
+    # print(f"【调试】进行指令识别，当前转录文本: {to_be_processed_turn.transcript}")
+    
+    # 获取待处理转录文本
+    transcript = to_be_processed_turn.transcript
+    
     # 创建任务但现在不等待
     instruction_searched_memories_task = asyncio.create_task(
         add_retrieved_memories_to_context_by_instruction(to_be_processed_turn)
     )
     new_system_context = asyncio.create_task(
-        get_global_status(llm_context.system_context)
+        get_global_status(llm_context.system_context, to_be_processed_turn)
     )
 
-    # 一起等待两者（实际上浩斌那里可能是一个函数处理）
+    # 一起等待两者
     results = await asyncio.gather(instruction_searched_memories_task, new_system_context)
 
     # 这里直接加入记忆和替换系统状态
     to_be_processed_turn.retrieved_memories.extend(results[0])
     llm_context.system_context = results[1]
-
 
 
 # ---- 添加内容到待处理区  ----
@@ -188,6 +272,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
     
     # 一起等待三者，后两者已经自行写入了，无返回值
     std_result, _, _ = await asyncio.gather(std_task, instruction_recognition_task, passive_memory_adding_task)
+    # print(f"【调试】std_result: {std_result}")
     
     # 如果std 为 true 则构造消息并交给大模型处理
     if std_result:
