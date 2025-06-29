@@ -204,7 +204,8 @@ class AliCloudSTTAdapter(STTClient):
                     enable_punctuation_prediction=True,  # 启用标点符号预测
                     enable_inverse_text_normalization=True,  # 启用中文数字转阿拉伯数字
                     ex={
-                        "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
+                        "disfluency": True,
+                        # "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
                         # 语音断句检测阈值，静音时长超过该阈值会被认为断句
                         # 范围：200-6000ms，默认800ms
                         # 注意：启用语义断句后此参数无效
@@ -219,7 +220,7 @@ class AliCloudSTTAdapter(STTClient):
                         "max_end_silence": config.max_end_silence
                     }
                 )
-                print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
+                # print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
             except Exception as exc:  # 使用不同的变量名避免闭包问题
                 # 如果启动失败，通过Future通知等待的协程
                 print(f"【错误】线程内: 启动识别会话失败: {exc}")
@@ -412,6 +413,7 @@ class AliCloudSTTAdapter(STTClient):
         try:
             # print(f"【调试】句子结束回调: {message}")
             result = json.loads(message)
+            # print(f"【调试】句子结束回调2: {result}")
             
             if 'payload' in result and 'result' in result['payload']:
                 sentence_text = result['payload']['result']

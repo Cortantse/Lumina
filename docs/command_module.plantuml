@@ -1,0 +1,346 @@
+@startuml 命令模块类图
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+
+title Lumina 命令模块 - 类图
+
+package "命令模块核心" {
+  enum CommandType {
+    MEMORY_MULTI
+    TTS_CONFIG
+    PREFERENCE
+    NONE
+  }
+
+  class CommandResult {
+    +type: CommandType
+    +action: str
+    +params: Dict
+    +confidence: float
+    +is_command()
+    +to_dict()
+  }
+
+  class CommandDetector {
+    +rule_detector: RuleBasedDetector
+    +intent_detector: IntentDetector
+    +handler_map: Dict
+    +detect_command(text: str) -> CommandResult
+    +detect_command_with_tools(text: str) -> CommandResult
+  }
+
+  interface CommandExecutor {
+    +execute(command_result: CommandResult) -> Dict
+    +store_to_memory(command_result: CommandResult, execution_result: Dict)
+  }
+
+  class CommandExecutorManager {
+    +executor_map: Dict[CommandType, CommandExecutor]
+    +execute(command_result: CommandResult)
+  }
+}
+
+package "检测器" {
+  class RuleBasedDetector {
+    +detect(text: str) -> CommandResult
+  }
+  
+  class IntentDetector {
+    +detect_fast_intent(text, intent_dict) -> str
+    +detect_intent_and_tool_call(text, command_tools) -> Dict
+  }
+}
+
+package "具体执行器" {
+  class MemoryMultiExecutor {
+    +execute(command_result: CommandResult) -> Dict
+  }
+
+  class TTSConfigExecutor {
+    +execute(command_result: CommandResult) -> Dict
+  }
+
+  class PreferenceExecutor {
+    +execute(command_result: CommandResult) -> Dict
+  }
+}
+
+package "处理器" {
+  class MemoryMultiHandler {
+    +process_query_memory(params) -> Dict
+    +process_save_memory(params) -> Dict
+    +process_delete_memory(params) -> Dict
+  }
+
+  class TTSConfigHandler {
+    +process_set_voice(params) -> Dict
+    +process_set_style(params) -> Dict
+    +process_set_speed(params) -> Dict
+  }
+
+  class PreferenceHandler {
+    +process_set_response_style(params) -> Dict
+    +process_set_knowledge_domain(params) -> Dict
+  }
+}
+
+' 关系
+CommandDetector --> CommandResult : 创建
+CommandDetector --> IntentDetector : 使用
+CommandDetector --> RuleBasedDetector : 使用
+CommandExecutorManager --> CommandExecutor : 管理
+CommandExecutor <|-- MemoryMultiExecutor : 实现
+CommandExecutor <|-- TTSConfigExecutor : 实现
+CommandExecutor <|-- PreferenceExecutor : 实现
+MemoryMultiExecutor --> MemoryMultiHandler : 使用
+TTSConfigExecutor --> TTSConfigHandler : 使用
+PreferenceExecutor --> PreferenceHandler : 使用
+CommandDetector --> CommandExecutorManager : 使用
+
+@enduml
+
+@startuml 命令模块处理流程
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+
+title Lumina 命令模块 - 处理流程
+
+actor 用户
+participant "PipelineService" as Pipeline
+participant "CommandDetector" as Detector
+participant "IntentDetector" as IntentDet
+participant "大语言模型" as LLM
+participant "CommandExecutorManager" as Executor
+
+autonumber
+
+用户 -> Pipeline: 输入文本
+Pipeline -> Detector: detect_command(text)
+
+Detector -> IntentDet: detect_fast_intent(text)
+IntentDet --> Detector: 返回意图类型(A/B/C/D)
+
+alt 检测到命令意图
+  Detector --> Pipeline: CommandResult(type=特定类型)
+  Pipeline -> Detector: detect_command_with_tools(text)
+  
+  Detector -> IntentDet: detect_intent_and_tool_call(text, tools)
+  IntentDet -> LLM: 发送工具定义和用户文本
+  LLM --> IntentDet: 返回结构化工具调用
+  IntentDet --> Detector: 工具调用结果
+  
+  Detector -> Detector: _create_command_result_from_tool()
+  Detector --> Pipeline: 完整的CommandResult
+  
+  Pipeline -> Executor: execute(command_result)
+  
+  alt 记忆类命令
+    Executor -> Executor: 执行记忆操作
+    Executor --> Pipeline: 返回执行结果
+  else TTS类命令
+    Executor -> Executor: 更新TTS配置
+    Executor --> Pipeline: 返回执行结果
+  else 偏好类命令
+    Executor -> Executor: 更新用户偏好
+    Executor --> Pipeline: 返回执行结果
+  end
+  
+  Pipeline --> 用户: 执行结果
+else 普通对话
+  Detector --> Pipeline: CommandResult(NONE)
+  Pipeline -> LLM: 发送普通对话请求
+  LLM --> Pipeline: 返回LLM响应
+  Pipeline --> 用户: LLM响应结果
+end
+
+@enduml
+
+@startuml 命令模块在系统中的位置
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+
+title Lumina 命令模块 - 在系统中的位置
+
+package "前端" {
+  [用户界面] as UI
+  [音频捕获] as AudioCapture
+  [音频播放] as AudioPlayer
+}
+
+package "后端" {
+  [ws/audio接口] as WSAudio
+  [PipelineService] as Pipeline
+  
+  package "命令模块" {
+    [CommandDetector] as CmdDetector
+    [CommandExecutorManager] as CmdExecutor
+    [IntentDetector] as IntentDetector
+    [MemoryMultiHandler] as MemoryHandler
+    [TTSConfigHandler] as TTSHandler
+    [PreferenceHandler] as PrefHandler
+  }
+  
+  package "语音识别" {
+    [AliCloudSTTAdapter] as STTAdapter
+  }
+  
+  package "大模型" {
+    [QwenClient] as LLMClient
+    [上下文管理] as Context
+  }
+  
+  package "语音合成" {
+    [MiniMaxTTSClient] as TTSClient
+  }
+  
+  package "记忆系统" {
+    [存储] as MemoryStorage
+    [检索] as MemoryRetrieval
+  }
+}
+
+' 关系
+UI --> AudioCapture
+AudioCapture --> WSAudio
+WSAudio --> Pipeline
+Pipeline --> STTAdapter
+STTAdapter --> Pipeline
+
+Pipeline --> CmdDetector : 语音识别结果
+CmdDetector --> IntentDetector : 命令检测
+IntentDetector --> CmdDetector : 命令类型
+CmdDetector --> Pipeline : 命令结果
+Pipeline --> CmdExecutor : 命令执行
+
+CmdExecutor --> MemoryHandler : 记忆命令
+CmdExecutor --> TTSHandler : TTS命令
+CmdExecutor --> PrefHandler : 偏好命令
+
+MemoryHandler --> MemoryStorage : 记忆操作
+MemoryHandler --> MemoryRetrieval : 记忆操作
+TTSHandler --> TTSClient : 配置更新
+
+Pipeline --> LLMClient : 普通对话
+LLMClient --> Context
+Context --> MemoryStorage
+
+Pipeline --> TTSClient
+TTSClient --> AudioPlayer
+
+@enduml
+
+@startuml 命令模块详细流程
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+
+title Lumina 命令模块 - 详细流程
+
+actor 用户 as User
+participant PipelineService as Pipeline
+participant CommandDetector as CmdDetector
+participant "RuleBasedDetector" as RuleDet
+participant "IntentDetector" as IntentDet
+participant "大语言模型" as LLM
+participant "CommandExecutorManager" as CmdExec
+
+autonumber
+
+User -> Pipeline: 输入文本 "请将音色切换为女性"
+Pipeline -> CmdDetector: detect_command("请将音色切换为女性")
+
+group 快速意图分类阶段
+  CmdDetector -> IntentDet: detect_fast_intent(text)
+  IntentDet -> IntentDet: 使用快速分类字典匹配
+  IntentDet --> CmdDetector: 返回 "B" (TTS_CONFIG类型)
+end
+
+group 命令确认阶段
+  CmdDetector --> Pipeline: CommandResult(type=TTS_CONFIG)
+  Pipeline -> CmdDetector: detect_command_with_tools(text)
+end
+
+group 详细工具调用阶段
+  CmdDetector -> IntentDet: detect_intent_and_tool_call(text, tools)
+  IntentDet -> LLM: 发送工具定义和用户文本
+  LLM --> IntentDet: 返回结构化工具调用结果
+  note right of LLM: {name: "tts_config_command", arguments: {action: "set_voice", params: {voice: "女性"}}}
+  IntentDet --> CmdDetector: 工具调用结果
+end
+
+group 命令创建与执行阶段
+  CmdDetector -> CmdDetector: _create_command_result_from_tool(tool)
+  CmdDetector --> Pipeline: CommandResult(type=TTS_CONFIG, action="set_voice", params={"voice": "女性"})
+  
+  Pipeline -> CmdExec: execute(command_result)
+  CmdExec -> CmdExec: 获取TTSConfigExecutor
+  CmdExec -> CmdExec: 执行set_voice操作
+  CmdExec -> CmdExec: 更新TTS客户端配置
+  CmdExec -> CmdExec: 保存配置到记忆
+  CmdExec --> Pipeline: 执行结果 {status: "success", message: "已将音色设置为女性"}
+end
+
+Pipeline --> User: "我已经将音色切换为女性，有什么我可以帮您的吗？"
+
+@enduml
+
+@startuml 命令模块与记忆系统交互流程
+' 使用更好看的皮肤
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontName "Microsoft YaHei"
+
+title Lumina 命令模块 - 与记忆系统交互流程
+
+actor 用户 as User
+participant PipelineService as Pipeline
+participant CommandDetector as CmdDetector
+participant "IntentDetector" as IntentDet
+participant "大语言模型" as LLM
+participant "CommandExecutorManager" as CmdExec
+participant "MemoryMultiExecutor" as MemExec
+participant "MemoryStorage" as Memory
+
+autonumber
+
+User -> Pipeline: 输入文本 "帮我记住下周三要去医院复诊"
+Pipeline -> CmdDetector: detect_command(text)
+
+group 快速意图分类阶段
+  CmdDetector -> IntentDet: detect_fast_intent(text)
+  IntentDet --> CmdDetector: 返回 "A" (MEMORY_MULTI类型)
+end
+
+CmdDetector --> Pipeline: CommandResult(type=MEMORY_MULTI)
+Pipeline -> CmdDetector: detect_command_with_tools(text)
+
+group 详细工具调用阶段
+  CmdDetector -> IntentDet: detect_intent_and_tool_call(text, tools)
+  IntentDet -> LLM: 发送工具定义和用户文本
+  LLM --> IntentDet: 返回结构化工具调用
+  note right of LLM: {name: "memory_multi_command", arguments: {action: "save_memory", params: {content: "下周三医院复诊", tags: ["医疗", "日程"]}}}
+  IntentDet --> CmdDetector: 工具调用结果
+end
+
+group 命令创建与执行阶段
+  CmdDetector -> CmdDetector: _create_command_result_from_tool(tool)
+  CmdDetector --> Pipeline: CommandResult(type=MEMORY_MULTI, action="save_memory", params={"content": "下周三医院复诊", "tags": ["医疗", "日程"]})
+  
+  Pipeline -> CmdExec: execute(command_result)
+  CmdExec -> MemExec: execute(command_result)
+  MemExec -> Memory: save_memory(content, tags, source="user")
+  Memory --> MemExec: 保存结果 {id: "memory123", status: "success"}
+  MemExec --> CmdExec: 执行结果
+  CmdExec --> Pipeline: 执行结果 {status: "success", message: "已保存记忆", memory_id: "memory123"}
+end
+
+Pipeline --> User: "我已记住下周三您要去医院复诊，到时会提醒您。"
+
+@enduml 
