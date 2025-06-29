@@ -207,6 +207,9 @@ class MiniMaxTTSClient(TTSClient):
         self.default_pitch = 0  # 范围[-12,12]
         self.default_emotion = TTSApiEmotion.NEUTRAL  # 默认情绪为中性
         
+        # 记忆上一句的情绪
+        self.last_used_emotion = None
+        
         # 记忆客户端，延迟初始化
         self.memory_client = None
         # 初始化时不立即存储配置，移到异步initialize方法中
@@ -542,28 +545,47 @@ class MiniMaxTTSClient(TTSClient):
         5. 收到 is_final=True 时退出，关闭 WebSocket 连接
         
         Args:
-            api_emotion: 情绪枚举值，如果为None则尝试从文本中提取情绪或使用默认情绪
+            api_emotion: 情绪枚举值，如果为None则尝试从文本中提取情绪或使用上一句的情绪或默认情绪
             text: 要转换为语音的文本
             voice_id: 语音ID，如果为None则使用默认值
             speed: 语速，范围[0.5,2]，如果为None则使用默认值
             volume: 音量，范围(0,10]，如果为None则使用默认值
             pitch: 音调，范围[-12,12]，如果为None则使用默认值
         """
+        used_emotion = None
+        has_emotion_mark = False
+        
         # 如果传入的情绪为None，尝试从文本中提取情绪
         if api_emotion is None:
             cleaned_text, extracted_emotion = extract_emotion_from_text(text)
-            text = cleaned_text
-            api_emotion = extracted_emotion
+            if text != cleaned_text:  # 表示找到了情绪标记
+                text = cleaned_text
+                used_emotion = extracted_emotion
+                has_emotion_mark = True
+                print(f"【TTS】从文本中提取到情绪: {used_emotion.value}")
+            else:
+                # 文本中没有情绪标记，尝试使用上一句的情绪
+                if self.last_used_emotion:
+                    used_emotion = self.last_used_emotion
+                    print(f"【TTS】使用上一句的情绪: {used_emotion.value}")
+                else:
+                    # 没有上一句情绪，使用默认情绪
+                    used_emotion = self.default_emotion
+                    print(f"【TTS】没有情绪标记和上一句情绪，使用默认情绪: {used_emotion.value}")
         else:
-            # 使用传入的情绪，但仍需检查文本是否包含情绪标记
+            # 使用传入的情绪
+            used_emotion = api_emotion
+            # 仍需检查文本是否包含情绪标记
             if text.strip().startswith("["):
                 cleaned_text, _ = extract_emotion_from_text(text)
-                text = cleaned_text
+                if text != cleaned_text:  # 表示找到了情绪标记
+                    text = cleaned_text
+                    has_emotion_mark = True
         
-        # 如果情绪仍然为None(理论上不应该，前面已处理)，使用默认情绪
-        if api_emotion is None:
-            api_emotion = self.default_emotion
-            print(f"【TTS】使用默认情绪: {api_emotion.name}")
+        # 记住这次使用的情绪，供下次使用
+        if has_emotion_mark:  # 只有当句子带有明确的情绪标记时才更新记忆
+            self.last_used_emotion = used_emotion
+            print(f"【TTS】更新情绪记忆为: {used_emotion.value}")
 
         ws = await self._establish_connection()
         if ws is None:
@@ -572,7 +594,7 @@ class MiniMaxTTSClient(TTSClient):
         try:
             started = await self._start_task(
                 ws, 
-                api_emotion,
+                used_emotion,
                 voice_id=voice_id,
                 speed=speed,
                 volume=volume,

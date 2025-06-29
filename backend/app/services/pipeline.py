@@ -2,6 +2,10 @@
 
 from typing import Optional, Any, List, Callable, Dict
 import asyncio
+import time
+import wave
+import torch
+from fastapi import WebSocket
 
 from app.protocols.stt import AudioData, STTResponse, STTClient
 from app.protocols.stt import create_alicloud_stt_client
@@ -40,7 +44,7 @@ class PipelineService:
         # 初始化TTS客户端（异步初始化，但在start方法中确保已完成）
         self.tts_client = None
         self.tts_api_key = tts_api_key
-        self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
+        # self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
         
         # TTS播放控制
         self.tts_playing = False
@@ -225,36 +229,38 @@ class PipelineService:
                 if not self.tts_playing:
                     sentences = await self.stt_client.get_complete_sentences()
                     
-                    if sentences:
-                        # print(f"【调试】发现STT缓冲区有{len(sentences)}条完整句子，准备TTS转换")
-                        
+                    if sentences:                
                         # 将所有句子合并为一段文本
                         text = "，".join(sentences)
-                        # print(f"【调试】合并后的文本: '{text}'")
-                        
-                        # 异步处理命令
-                        # asyncio.create_task(self.command_detector.process(text))
-                        # command_task = asyncio.create_task(self.command_detector.process(text))
-                        
+
                         # 清空缓冲区  
-                        cleared_count = await self.stt_client.clear_sentence_buffer()
-                        # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")                        
+                        cleared_count = await self.stt_client.clear_sentence_buffer()                     
 
                         from app.llm.qwen_client import simple_send_request_to_llm
 
-                        text = await simple_send_request_to_llm(text)
-
-                        # 如果没有test 就不进行
-                        if not text:
-                            continue
-
-                        # 播放TTS
-                        self.tts_playing = True
-                        # 获取音频流并发送到前端
-                        audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
-                        await send_tts_audio_stream(audio_stream)
+                        # 发送消息到LLM
+                        # 使用修改后的流式输出，每个句子单独处理
+                        # 异步生成器不能使用await，直接获取生成器
+                        llm_response_generator = simple_send_request_to_llm(text)
                         
-                        self.tts_playing = False
+                        # 处理每个生成的完整句子
+                        async for sentence in llm_response_generator:
+                            if not sentence:
+                                continue
+                                
+                            print(f"【调试】[Pipeline] 收到完整句子: {sentence}")
+                            
+                            # 播放TTS
+                            self.tts_playing = True
+                            # 获取音频流并发送到前端
+                            audio_stream = self.tts_client.send_tts_request(None, sentence)
+                            await send_tts_audio_stream(audio_stream)
+                            
+                            # 每个句子播放完成后，重置状态
+                            self.tts_playing = False
+                            
+                            # 给TTS一点时间处理
+                            # await asyncio.sleep(0.1)
                 
                 # 等待下一次检查
                 await asyncio.sleep(self.check_interval)
