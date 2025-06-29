@@ -5,7 +5,6 @@ from .detector import CommandDetector
 from .schema import (
     CommandType, 
     CommandResult, 
-    ControlAction,
     MemoryAction, 
     TTSConfigAction, 
     PreferenceAction,

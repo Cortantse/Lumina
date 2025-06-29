@@ -11,14 +11,6 @@ class CommandType(Enum):
     NONE = auto()            # 非命令
 
 
-# class ControlAction(Enum):
-#     """控制类动作枚举"""
-#     PAUSE_TTS = "pause_tts"           # 暂停语音合成
-#     RESUME_TTS = "resume_tts"         # 继续语音合成
-#     REPLAY_TTS = "replay_tts"         # 重播语音
-#     EXIT_SESSION = "exit_session"     # 退出会话
-
-
 class MemoryAction(Enum):
     """记忆类动作枚举"""
     QUERY_MEMORY = "query_memory"     # 查询记忆
