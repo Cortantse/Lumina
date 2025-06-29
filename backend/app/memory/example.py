@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import time
 from typing import Optional
+from pathlib import Path
+import uuid
 
 # 修复相对导入问题
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -24,6 +26,9 @@ import app.core.config as config
 from app.protocols.memory import MemoryType
 from app.memory.store import get_memory_manager
 from app.protocols.memory import MemoryManager
+from app.services.orchestrator import get_orchestrator
+from app.models.image import ImageInput
+from app.models.dialogue import Dialogue
 
 # 存储用于测试的记忆ID
 stored_memory_ids = []
@@ -90,14 +95,14 @@ async def _select_memory_type_interactive(prompt_message: str) -> Optional[Memor
     print("无效选择或已跳过。")
     return None
 
-async def store_memory_interactive(memory_manager: MemoryManager) -> None:
+async def store_text_memory_interactive(memory_manager: MemoryManager) -> None:
     """
-    交互式存储记忆。
+    交互式存储文本记忆。
     
     Args:
         memory_manager: 记忆管理器实例
     """
-    print("\n===== 存储新记忆 =====")
+    print("\n===== 存储新文本记忆 =====")
     
     # 获取记忆文本
     content = await async_input("请输入记忆内容: ")
@@ -152,6 +157,69 @@ async def store_memory_interactive(memory_manager: MemoryManager) -> None:
     except Exception as e:
         print(f"存储记忆失败: {e}")
 
+async def store_image_memory_interactive() -> None:
+    """
+    交互式存储图片记忆，通过调用Orchestrator来模拟完整流程。
+    """
+    print("\n===== 存储新图片记忆 =====")
+    
+    try:
+        # 1. 获取图片路径
+        image_path_str = await async_input("请输入本地图片文件的完整路径: ")
+        
+        # 清理输入的路径字符串，去除常见的多余字符
+        # - .strip() 去除首尾的空格
+        # - .strip('\"\\'') 去除首尾可能存在的引号
+        # - .lstrip('\\u202a') 去除Windows复制路径时可能带入的不可见字符 (Left-to-Right Embedding)
+        cleaned_path_str = image_path_str.strip().strip('\"\'').lstrip('\u202a')
+        
+        image_path = Path(cleaned_path_str)
+        
+        if not image_path.exists() or not image_path.is_file():
+            print(f"文件不存在或不是一个有效文件: {image_path}")
+            return
+            
+        # 2. 获取图片描述
+        description = await async_input("请输入对这张图片的简短描述: ")
+        if not description.strip():
+            print("图片描述不能为空。操作取消。")
+            return
+
+        # 3. 读取图片二进制数据
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+
+        # 4. 创建 ImageInput 和一个虚拟的 Dialogue 对象
+        image_input = ImageInput(
+            data=image_data,
+            format=image_path.suffix.lstrip('.'), # e.g., ".png" -> "png"
+            short_description=description
+        )
+        
+        # process_multimedia_input 需要一个 Dialogue 对象来关联元数据
+        dummy_dialogue = Dialogue(
+            id=str(uuid.uuid4()),
+            user_id="test_user",
+            session_id="test_session"
+        )
+
+        # 5. 获取编排器并调用处理方法
+        orchestrator = get_orchestrator()
+        print("\n正在调用编排器处理图片输入...")
+        start_time = time.time()
+        
+        await orchestrator.process_multimedia_input(
+            image_inputs=[image_input],
+            related_dialogue=dummy_dialogue
+        )
+        
+        elapsed = time.time() - start_time
+        print(f"图片处理和记忆存储任务已提交 (耗时: {elapsed:.4f}秒)")
+        print("注意: 实际存储在后台进行。请稍后使用查询功能验证。")
+
+    except Exception as e:
+        print(f"存储图片记忆时发生错误: {e}")
+
 async def query_memory_interactive(memory_manager: MemoryManager) -> None:
     """
     交互式查询记忆。
@@ -205,6 +273,8 @@ async def query_memory_interactive(memory_manager: MemoryManager) -> None:
             print(f"   内容: {memory.original_text}")
             print(f"   父文档ID: {memory.vector_id}")
             print(f"   时间戳: {memory.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+            if memory.blob_uri:
+                print(f"   文件URI: {memory.blob_uri}")
             
             if memory.metadata:
                 print("   元数据:")
@@ -253,7 +323,7 @@ async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
     print(f"\n为输入 '{content}' 检索到 {len(turn.retrieved_memories)} 条相关记忆:")
     if not turn.retrieved_memories:
         print("-> 未检索到任何记忆。")
-        print("-> 提示: 请先用选项 '1. 存储新记忆' 存入一些相关内容再测试。")
+        print("-> 提示: 请先用选项 '1. 存储新文本记忆' 存入一些相关内容再测试。")
         return
 
     for i, memory in enumerate(turn.retrieved_memories):
@@ -272,14 +342,15 @@ async def show_menu() -> int:
     print("\n" + "=" * 40)
     print(" Lumina记忆系统交互式测试 ")
     print("=" * 40)
-    print("1. 存储新记忆")
-    print("2. 查询记忆")
-    print("3. 清除所有记忆")
-    print("4. 测试被动记忆检索")
+    print("1. 存储新文本记忆")
+    print("2. 存储新图片记忆")
+    print("3. 查询记忆")
+    print("4. 清除所有记忆")
+    print("5. 测试被动记忆检索")
     print("0. 退出")
     print("=" * 40)
     
-    choice = await async_input("请选择操作 [0-4]: ")
+    choice = await async_input("请选择操作 [0-5]: ")
     try:
         return int(choice)
     except ValueError:
@@ -309,17 +380,19 @@ async def main():
             print("\n感谢使用！再见！")
             break
         elif choice == 1:
-            await store_memory_interactive(memory_manager)
+            await store_text_memory_interactive(memory_manager)
         elif choice == 2:
-            await query_memory_interactive(memory_manager)
+            await store_image_memory_interactive()
         elif choice == 3:
+            await query_memory_interactive(memory_manager)
+        elif choice == 4:
             confirm_str = await async_input("\n确定要清除所有记忆吗? 此操作不可撤销 (y/n): ")
             confirm = confirm_str.strip().lower() == 'y'
             if confirm:
                 await clear_all_memories(memory_manager)
             else:
                 print("操作已取消。")
-        elif choice == 4:
+        elif choice == 5:
             await test_passive_retrieval_interactive(memory_manager)
         else:
             print("\n无效选择，请重试。")

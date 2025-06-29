@@ -306,3 +306,57 @@ for i in progress_bar(range(300), callback=on_progress):
     time.sleep(0.01)
 
 """
+
+# ================================== 新增 Blob 存储工具函数 ==================================
+
+def save_blob_and_get_uri(
+    data: bytes,
+    file_format: str,
+    subfolder: str = "default"
+) -> str:
+    """
+    将二进制数据(blob)保存到文件，并返回其文件URI。
+
+    Args:
+        data: 要保存的二进制数据。
+        file_format: 文件格式/扩展名 (例如 "png", "wav")。
+        subfolder: 用于存放文件的子文件夹名 (例如 "images", "audio")。
+
+    Returns:
+        一个标准的 `file://` URI 字符串，指向新创建的文件。
+    
+    Raises:
+        IOError: 如果文件写入失败。
+    """
+    from pathlib import Path
+    import uuid
+
+    try:
+        # 1. 定义并创建存储路径
+        #    - 使用 Path(__file__) 定位到当前文件
+        #    - .parent.parent.parent.parent 指向项目根目录 (backend/app/utils -> backend/app -> backend -> Lumina)
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent
+        blob_storage_path = base_dir / "data" / "blob_storage" / subfolder
+        blob_storage_path.mkdir(parents=True, exist_ok=True)
+
+        # 2. 生成唯一文件名
+        unique_filename = f"{uuid.uuid4()}.{file_format}"
+        file_path = blob_storage_path / unique_filename
+
+        # 3. 写入文件
+        with open(file_path, "wb") as f:
+            f.write(data)
+
+        # 4. 将文件路径转换为 file:// URI
+        #    - file_path.as_uri() 会生成正确的格式 (例如 "file:///d:/path/to/file")
+        file_uri = file_path.as_uri()
+        
+        # logger.debug(f"二进制数据已保存到: {file_uri}")
+        return file_uri
+
+    except IOError as e:
+        print_error(save_blob_and_get_uri, f"无法将二进制数据写入文件: {e}")
+        raise
+    except Exception as e:
+        print_error(save_blob_and_get_uri, f"保存二进制数据时发生未知错误: {e}")
+        raise

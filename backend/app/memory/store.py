@@ -278,6 +278,7 @@ class FAISSMemoryStore(RetrievalMixin):
                     original_text=parent_chunk,
                     type=mem_type,
                     vector_id=parent_id,
+                    blob_uri=blob_uri,
                     metadata={
                         "is_parent": "True",
                         **(metadata or {})
@@ -331,7 +332,8 @@ class FAISSMemoryStore(RetrievalMixin):
             original_text=original_text,
             type=mem_type,
             metadata=metadata,
-            vector_id=initial_parent_id
+            vector_id=initial_parent_id,
+            blob_uri=blob_uri
         )
 
         # 将 _store_task 作为一个后台任务启动，并把预生成的ID传进去

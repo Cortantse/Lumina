@@ -62,3 +62,15 @@ class DialogueState:
     """
     is_listening_voice: bool = False  # 是否正在监听人类语音
     is_speaking_voice: bool = False  # 是否正在说话
+
+
+@dataclass
+class Dialogue:
+    """
+    代表一次完整的对话交互，包含唯一标识符。
+    """
+    id: str
+    user_id: str
+    session_id: str
+    timestamp: float = field(default_factory=lambda: time.time())
+    metadata: Dict[str, Any] = field(default_factory=dict)
