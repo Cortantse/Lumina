@@ -91,7 +91,7 @@ class IntentDetector:
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
             # self._previous_messages.append({"role": "assistant", "content": response})
             
-            #print(f"【调试】[IntentDetector] 收到意图检测响应: {response}")
+            print(f"【调试】[IntentDetector] 收到意图检测响应: {response}")
             # #print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
             result = self.parse_text(response)

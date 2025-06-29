@@ -5,10 +5,10 @@ import abc
 
 class CommandType(Enum):
     """命令类型枚举，表示不同种类的指令"""
-    MEMORY_MULTI = auto()    # 记忆操作和多模态触发类指令，如查询记忆、图像分析
-    TTS_CONFIG = auto()      # TTS配置类指令，如设置音色
-    PREFERENCE = auto()      # 偏好设置类指令，如输出风格
-    NONE = auto()            # 非命令
+    MEMORY_MULTI = "MEMORY_MULTI"   # 记忆操作和多模态触发类指令，如查询记忆、图像分析
+    TTS_CONFIG = "TTS_CONFIG"       # TTS配置类指令，如设置音色
+    PREFERENCE = "PREFERENCE"       # 偏好设置类指令，如输出风格
+    NONE = "NONE"                   # 非命令
 
 
 class MemoryAction(Enum):

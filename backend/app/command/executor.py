@@ -22,37 +22,6 @@ class CommandExecutorManager:
             CommandType.PREFERENCE: PreferenceExecutor()
         }
     
-    def register_handler(self, handler, command_type=None):
-        """
-        注册命令执行器
-        
-        Args:
-            handler: 执行器实例
-            command_type: 命令类型，如果为None则尝试从处理器获取类型
-        
-        Returns:
-            None
-        """
-        if command_type is None:
-            # 尝试从处理器获取支持的命令类型
-            if hasattr(handler, 'supported_command_type'):
-                command_type = handler.supported_command_type
-            else:
-                # 对于TTSConfigHandler或其他旧版处理器，识别其类名与命令类型的对应关系
-                class_name = handler.__class__.__name__
-                if "TTS" in class_name:
-                    command_type = CommandType.TTS_CONFIG
-                elif "Memory" in class_name:
-                    command_type = CommandType.MEMORY_MULTI
-                elif "Preference" in class_name:
-                    command_type = CommandType.PREFERENCE
-                else:
-                    logger.error(f"无法确定处理器类型: {class_name}")
-                    return
-        
-        # 注册处理器
-        self.executor_map[command_type] = handler
-        logger.info(f"注册命令处理器 {handler.__class__.__name__} 为类型 {command_type}")
     
     def set_tts_client(self, tts_client):
         """设置TTS客户端"""

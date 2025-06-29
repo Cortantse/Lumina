@@ -84,9 +84,13 @@ async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) 
     # 5. 将去重后的唯一记忆添加到上下文中
     to_be_processed_turn.retrieved_memories.extend(unique_memories.values())
 
-async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn: ExpandedTurn) -> List[Memory]:
+async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn: ExpandedTurn, llm_context: LLMContext) -> List[Memory]:
     """
     添加高度相关记忆到上下文，主动根据指令添加
+    
+    Args:
+        to_be_processed_turn: 当前待处理的转录文本
+        llm_context: LLM上下文对象，包含系统上下文
     """
     # 从记忆库中获取与指令相关的记忆
     memory_manager = await get_memory_manager()
@@ -108,14 +112,10 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
     
     # 如果检测到了命令，根据命令类型处理
     if command_result and command_result.is_command():
-        # print(f"【调试】检测到命令: {command_result.type}")
         
         # 使用工具调用获取详细命令
         command_tools_result = await command_detector.detect_command_with_tools(transcript)
-        
         if command_tools_result:
-            print(f"【调试】命令工具识别结果: {command_tools_result}")
-            
             # 处理记忆操作类命令
             if command_tools_result.type.value == "MEMORY_MULTI":
                 # 执行命令
@@ -124,25 +124,42 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
                 
                 # 如果是查询记忆相关的命令，将结果添加到记忆列表中
                 if command_tools_result.action == "query_memory" and execution_result.get("success", False):
-                    #print(f"【调试】查询记忆成功")
                     retrieved_memories = execution_result.get("memories", [])
-                    #print(f"【调试】查询记忆结果: {retrieved_memories}")
+                    # print(f"【调试】查询记忆结果: {retrieved_memories}")
                     for memory_dict in retrieved_memories:
                         # 将字典格式的记忆转换为Memory对象
                         try:
-                            # 创建基本的Memory对象
+                            # 确保获取类型
+                            mem_type_str = memory_dict.get("type", "TEXT")
+                            memory_type = MemoryType(mem_type_str) if isinstance(mem_type_str, str) else mem_type_str
+                            
+                            # 创建Memory对象时明确提供type参数
                             memory = Memory(
                                 original_text=memory_dict.get("text", ""),
                                 vector_id=memory_dict.get("id", ""),
-                                metadata=memory_dict.get("metadata", {})
+                                metadata=memory_dict.get("metadata", {}),
+                                type=memory_type  # 确保明确提供type参数
                             )
-                            # 设置类型
-                            mem_type_str = memory_dict.get("type", "TEXT")
-                            memory.type = MemoryType(mem_type_str) if isinstance(mem_type_str, str) else mem_type_str
                             
                             memories.append(memory)
                         except Exception as e:
                             print(f"【错误】转换记忆字典到Memory对象失败: {str(e)}")
+            # 处理偏好设置类命令
+            elif command_tools_result.type.value == "PREFERENCE":
+                # 执行命令
+                execution_result = await executor_manager.execute_command(command_tools_result)
+                # print(f"【调试】执行偏好设置命令，返回结果: {execution_result}")
+                
+                # 处理偏好设置结果，更新系统上下文
+                if execution_result.get("success", True):
+                    preference_type = execution_result.get("preference_type")
+                    preference_value = execution_result.get("preference_value")
+                    
+                    # 如果返回结果中包含偏好类型和值，则更新系统上下文
+                    if preference_type and preference_value is not None:
+                        # 更新系统上下文
+                        llm_context.system_context.add(preference_type, preference_value)
+                        # print(f"【调试】[Context] 已将偏好设置更新到系统上下文: {preference_type} = {preference_value}")
             else:
                 # 对于其他类型命令，直接执行但不返回记忆
                 await executor_manager.execute_command(command_tools_result)
@@ -169,12 +186,8 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
     # 初始化GlobalCommandAnalyzer
     global_analyzer = GlobalCommandAnalyzer()
     
-    # 创建新的系统上下文
-    system_context = SystemContext()
-    
-    # 复制当前上下文的所有指令
-    for key, value in current_system_context.directives.items():
-        system_context.add(key, value)
+    # 直接使用当前上下文对象，不再创建新的对象
+    # 这样可以保证所有已设置的偏好都会被保留
     
     # 获取当前处理的转录文本
     current_transcript = to_be_processed_turn.transcript
@@ -184,14 +197,13 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
         analysis_result = await global_analyzer.analyze_text(current_transcript)
         
         # 更新系统上下文中的情绪和关键内容
-        system_context.add("user_emotion", analysis_result["emotion"])
-        system_context.add("key_content", analysis_result["key_content"])
-        print(f"【调试】analysis_result: {analysis_result}")
+        current_system_context.add("user_emotion", analysis_result["emotion"])
+        current_system_context.add("key_content", analysis_result["key_content"])
     except Exception as e:
         # 出现错误时不更新情绪和关键内容
         print(f"全局状态分析出错: {str(e)}")
     
-    return system_context
+    return current_system_context
 
 
 # --- 接口：指令识别 ---- #
@@ -217,11 +229,12 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
     
     # 创建任务但现在不等待
     instruction_searched_memories_task = asyncio.create_task(
-        add_retrieved_memories_to_context_by_instruction(to_be_processed_turn)
+        add_retrieved_memories_to_context_by_instruction(to_be_processed_turn, llm_context)
     )
     new_system_context = asyncio.create_task(
         get_global_status(llm_context.system_context, to_be_processed_turn)
     )
+    
 
     # 一起等待两者
     results = await asyncio.gather(instruction_searched_memories_task, new_system_context)
