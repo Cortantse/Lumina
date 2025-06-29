@@ -39,7 +39,7 @@ MEMORY_CONFIG = {
 }
 
 VECTORIZATION_CONFIG = {
-    "default_model": "openai",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "default_model": "bge-base-zh",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
     "models": {
         "openai": {
             "type": "openai",
