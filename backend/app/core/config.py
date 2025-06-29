@@ -21,6 +21,8 @@ max_sentence_silence = 100 # 最大句子静默时间，单位：毫秒
 max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
 max_end_silence = 500 # 最大结束静默时间，单位：毫秒
 
+recent_judge_context_count = 6 # 最近 std 判断上下文数量
+
 # 文本分块配置 (用于RAG中的父子文档策略)
 # 这些参数控制着长文本在存入记忆前如何被分割成小块。
 # 合理的块大小和重叠能显著影响检索的准确率。
@@ -37,7 +39,7 @@ MEMORY_CONFIG = {
 }
 
 VECTORIZATION_CONFIG = {
-    "default_model": "bge-base-zh",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "default_model": "openai",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
     "models": {
         "openai": {
             "type": "openai",

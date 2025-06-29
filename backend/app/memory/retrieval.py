@@ -24,20 +24,33 @@ class RetrievalMixin:
         time_range: Optional[Tuple[dt.datetime, dt.datetime]] = None,
     ) -> Sequence[Tuple[Memory, float]]:
         """
-        使用父子文档策略检索记忆。
+            使用父子文档策略检索记忆，并按相似度与时间优先级排序。
 
-        此方法会搜索父向量和子向量，但总是返回父文档以提供完整的上下文。
-        它会根据父文档获得的最高分（无论是直接命中还是通过其子文档命中）进行排序。
-        
-        Args:
-            query: 搜索查询
-            limit: 返回结果的最大数量
-            filter_type: 可选的按记忆类型过滤
-            time_range: 可选的按时间范围过滤 (开始, 结束)
+            本方法会针对用户的查询在整个向量索引（包括父文档和子文档）中检索，
+            并始终返回父文档以保证上下文完整。返回结果根据以下规则排序：
             
-        Returns:
-            一个 (Memory, score) 元组的列表，其中Memory对象总是父文档。
-        """
+            1. **相似度分组**  
+                - Group 0：相似度 > MEMORY_CONFIG["retrieval_similarity_threshold"]  
+                - Group 1：相似度 ≤ MEMORY_CONFIG["retrieval_similarity_threshold"]  
+            2. **组内优先级**  
+                - 如果提供了 `time_range`，则组内位于指定时间段的记忆会排在前面  
+                - Group 0 再按 `timestamp` 降序  
+                - Group 1 再按 `similarity_score` 降序
+
+            Args:
+                query (str):       用户的文本查询。
+                limit (int):       希望返回的最大结果数，默认 5。
+                filter_type (MemoryType | None):  
+                                可选；仅检索指定类型的记忆。
+                time_range (tuple[datetime, datetime] | None):  
+                                可选；若提供 `(start, end)`，则在最终排序时
+                                将此时间段内的记忆置于同组前列。
+
+            Returns:
+                Sequence[Tuple[Memory, float]]:  
+                    按上述多重逻辑排序后的父文档和其最高相似度分数列表，
+                    最多 `limit` 条。
+            """
         if not self.memories or self.index.ntotal == 0:
             return []
         
@@ -69,10 +82,6 @@ class RetrievalMixin:
             # -- 应用过滤器 --
             if filter_type and memory.type != filter_type:
                 continue
-            if time_range:
-                start_time, end_time = time_range
-                if not (start_time <= memory.timestamp <= end_time):
-                    continue
 
             similarity_score = float(distances[0][i])
             
@@ -90,15 +99,35 @@ class RetrievalMixin:
                     if parent_memory:
                          parent_candidates[parent_id_to_use] = (parent_memory, similarity_score)
 
-        # 4. 按我们定义的多重逻辑对唯一的父文档进行排序
-        # - Group 0: 相似度 > 0.78, 按时间戳降序 (最近的在前)
-        # - Group 1: 相似度 <= 0.78, 按相似度分数降序
+        # 4. 按多重逻辑对唯一的父文档进行排序
+        #    - 首先分组：Group 0 (相似度 > 阈值)，Group 1 (相似度 ≤ 阈值)
+        #    - 组内：先判断是否在 time_range 内（在区间内的优先）
+        #    - Group 0 内，再按 timestamp 降序；Group 1 内，再按分数降序
         def sort_key(item: Tuple[Memory, float]):
             memory, score = item
+            # 是否在指定时间段内
+            in_range = False
+            if time_range:
+                start_time, end_time = time_range
+                in_range = (start_time <= memory.timestamp <= end_time)
+
             if score > MEMORY_CONFIG["retrieval_similarity_threshold"]:
-                return (0, -memory.timestamp.timestamp(), -score) # 在时间相同的情况下，仍然按分数排序
+                # Group 0: 高相似度
+                # 排序键： (组别, 是否不在区间(1 表示不在)，-timestamp, -score)
+                return (
+                    0,
+                    0 if in_range else 1,
+                    -memory.timestamp.timestamp(),
+                    -score,
+                )
             else:
-                return (1, -score, 0) # 填充一个值以保持元组结构一致
+                # Group 1: 低相似度
+                # 排序键： (组别, 是否不在区间(1 表示不在), -score)
+                return (
+                    1,
+                    0 if in_range else 1,
+                    -score,
+                )
 
         sorted_parents = sorted(parent_candidates.values(), key=sort_key)
         
