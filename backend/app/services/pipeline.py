@@ -1,11 +1,17 @@
 # app/services/pipeline.py 将 STT -> STD -> Memory -> LLM -> TTS 串联起来
 
-from typing import Optional, Any, List, Callable, Dict
+from typing import Optional, Any, List, Callable, Dict, AsyncGenerator
 import asyncio
+import time
+import wave
+import torch
+from fastapi import WebSocket
+import queue
+from collections import deque
 
 from app.protocols.stt import AudioData, STTResponse, STTClient
 from app.protocols.stt import create_alicloud_stt_client
-from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion, get_tts_client
+from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion, get_tts_client, TTSResponse
 from app.tts.send_tts import send_tts_audio_stream
 # 初始化并注册命令检测器
 from app.memory.store import get_memory_manager
@@ -40,7 +46,7 @@ class PipelineService:
         # 初始化TTS客户端（异步初始化，但在start方法中确保已完成）
         self.tts_client = None
         self.tts_api_key = tts_api_key
-        self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
+        # self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
         
         # TTS播放控制
         self.tts_playing = False
@@ -49,6 +55,10 @@ class PipelineService:
         
         # 初始化记忆客户端
         self.memory_client = None
+        
+        # 添加用于并行处理的队列
+        self.sentence_queue = asyncio.Queue()  # 句子队列，存储LLM生成的句子
+        self.tts_task = None  # TTS处理任务
         
         # print("【调试】PipelineService初始化完成")
         
@@ -99,6 +109,11 @@ class PipelineService:
         if not self.tts_monitor_task:
             self.tts_monitor_task = asyncio.create_task(self._monitor_stt_buffer())
             # print("【调试】STT缓冲区监控任务已启动")
+            
+        # 启动TTS处理任务
+        if not self.tts_task:
+            self.tts_task = asyncio.create_task(self._process_tts_queue())
+            print("【调试】TTS处理任务已启动")
         
     def stop(self) -> None:
         """停止Pipeline服务
@@ -112,6 +127,12 @@ class PipelineService:
             self.tts_monitor_task.cancel()
             self.tts_monitor_task = None
             # print("【调试】STT缓冲区监控任务已停止")
+            
+        # 停止TTS处理任务
+        if self.tts_task:
+            self.tts_task.cancel()
+            self.tts_task = None
+            print("【调试】TTS处理任务已停止")
             
         # print("【调试】Pipeline服务已停止")
         
@@ -208,53 +229,60 @@ class PipelineService:
             print(f"【错误】结束STT会话失败: {e}")
             return None
     
-    async def _monitor_stt_buffer(self) -> None:
-        """监控STT缓冲区
+    async def _process_tts_queue(self) -> None:
+        """处理TTS队列中的句子
         
-        定期检查STT缓冲区中是否有完整句子，如果有则进行TTS转换并播放
+        不断从队列中获取句子并进行TTS转换，然后发送到前端
         """
-        # print("【调试】开始监控STT缓冲区")
+        # print("【调试】开始处理TTS队列")
         
         # 确保TTS客户端已初始化
         if not self.tts_client:
             await self.init_tts_client()
+            
+        while self.running:
+            try:
+                # 从队列中获取一个句子
+                sentence = await self.sentence_queue.get()
+                
+                if sentence:
+                    # print(f"【调试】[TTS处理器] 处理句子: {sentence}")
+                    
+                    # 获取音频流并发送到前端
+                    audio_stream = self.tts_client.send_tts_request(None, sentence)
+                    await send_tts_audio_stream(audio_stream)
+                    
+                    # 标记任务完成
+                    self.sentence_queue.task_done()
+                
+            except asyncio.CancelledError:
+                print("【调试】TTS处理任务被取消")
+                break
+            except Exception as e:
+                print(f"【错误】处理TTS队列时出错: {e}")
+                await asyncio.sleep(0.1)  # 发生错误时等待一小段时间
+    
+    async def _monitor_stt_buffer(self) -> None:
+        """监控STT缓冲区
+        
+        定期检查STT缓冲区中是否有完整句子，如果有则启动LLM处理并将生成的句子放入TTS队列
+        """
+        print("【调试】开始监控STT缓冲区")
         
         while self.running:
             try:
-                # 如果当前没有在播放TTS，检查缓冲区是否有内容
-                if not self.tts_playing:
-                    sentences = await self.stt_client.get_complete_sentences()
-                    
-                    if sentences:
-                        # print(f"【调试】发现STT缓冲区有{len(sentences)}条完整句子，准备TTS转换")
-                        
-                        # 将所有句子合并为一段文本
-                        text = "，".join(sentences)
-                        # print(f"【调试】合并后的文本: '{text}'")
-                        
-                        # 异步处理命令
-                        # asyncio.create_task(self.command_detector.process(text))
-                        # command_task = asyncio.create_task(self.command_detector.process(text))
-                        
-                        # 清空缓冲区  
-                        cleared_count = await self.stt_client.clear_sentence_buffer()
-                        # print(f"【调试】清空缓冲区，共清除{cleared_count}条句子")                        
+                # 检查缓冲区是否有内容
+                sentences = await self.stt_client.get_complete_sentences()
+                
+                if sentences:                
+                    # 将所有句子合并为一段文本
+                    text = "，".join(sentences)
 
-                        from app.llm.qwen_client import simple_send_request_to_llm
+                    # 清空缓冲区  
+                    cleared_count = await self.stt_client.clear_sentence_buffer()   
 
-                        text = await simple_send_request_to_llm(text)
-
-                        # 如果没有test 就不进行
-                        if not text:
-                            continue
-
-                        # 播放TTS
-                        self.tts_playing = True
-                        # 获取音频流并发送到前端
-                        audio_stream = self.tts_client.send_tts_request(self.tts_emotion, text)
-                        await send_tts_audio_stream(audio_stream)
-                        
-                        self.tts_playing = False
+                    # 启动异步任务处理LLM响应
+                    asyncio.create_task(self._process_llm_response(text))
                 
                 # 等待下一次检查
                 await asyncio.sleep(self.check_interval)
@@ -265,6 +293,33 @@ class PipelineService:
             except Exception as e:
                 print(f"【错误】监控STT缓冲区时出错: {e}")
                 await asyncio.sleep(self.check_interval)  # 发生错误时也等待下一个间隔
+    
+    async def _process_llm_response(self, text: str) -> None:
+        """处理LLM响应
+        
+        接收用户输入文本，发送到LLM，并将生成的句子放入TTS队列
+        
+        Args:
+            text: 用户输入文本
+        """
+        try:
+            from app.llm.qwen_client import simple_send_request_to_llm
+            
+            # 发送消息到LLM并获取响应生成器
+            llm_response_generator = simple_send_request_to_llm(text)
+            
+            # 处理每个生成的完整句子
+            async for sentence in llm_response_generator:
+                if not sentence:
+                    continue
+                    
+                print(f"【调试】[Pipeline] 收到完整句子: {sentence}")
+                
+                # 将句子放入队列，供TTS处理器处理
+                await self.sentence_queue.put(sentence)
+                
+        except Exception as e:
+            print(f"【错误】处理LLM响应时出错: {e}")
     
     async def _run_callback(self, callback: Callable, text: str, is_final: bool) -> None:
         """运行回调函数
