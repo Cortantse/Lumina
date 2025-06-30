@@ -6,7 +6,6 @@ from typing import Dict, Optional, Sequence, Tuple, TYPE_CHECKING
 import numpy as np
 from ..protocols.memory import Memory, MemoryType
 from ..core.config import MEMORY_CONFIG
-import os
 
 if TYPE_CHECKING:
     from .store import FAISSMemoryStore
@@ -137,37 +136,3 @@ class RetrievalMixin:
     async def get(self: "FAISSMemoryStore", vector_id: str) -> Optional[Memory]:
         """Retrieve a single memory object by its unique vector_id."""
         return self.memories.get(vector_id) 
-
-    async def get_binary_data(self: "FAISSMemoryStore", memory: Memory) -> Optional[bytes]:
-        """
-        获取与记忆关联的二进制数据。
-
-        Args:
-            memory: 要获取二进制数据的记忆对象
-
-        Returns:
-            二进制数据，如果不存在则返回None
-        """
-        if not memory.blob_uri or not self.persist_dir:
-            return None
-            
-        try:
-            # 构建二进制文件路径
-            binary_dir = os.path.join(self.persist_dir, "binary_data")
-            blob_path = os.path.join(binary_dir, memory.blob_uri)
-            
-            # 检查文件是否存在
-            if not os.path.exists(blob_path):
-                logger.warning(f"二进制文件不存在: {blob_path}")
-                return None
-                
-            # 读取二进制数据
-            with open(blob_path, 'rb') as f:
-                binary_data = f.read()
-                
-            logger.info(f"成功读取二进制数据: {blob_path}, 大小: {len(binary_data)} 字节")
-            return binary_data
-            
-        except Exception as e:
-            logger.error(f"读取二进制数据失败: {e}")
-            return None 
