@@ -121,6 +121,13 @@ class SystemContext:
     def add(self, key: str, value: Any):
         """添加或更新指令项，按时间倒序排列，保留最多 max_length 条"""
         item = TimedItem(value=value, timestamp=time.time())
+        
+        # 特殊处理tts_config，直接替换而不是添加到列表
+        if key == "tts_config":
+            self.directives[key] = [item]  # 仅保留最新的tts_config
+            return
+            
+        # 常规处理其他指令
         if key not in self.directives:
             self.directives[key] = []
         self.directives[key].insert(0, item)  # 新值放前面

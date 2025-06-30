@@ -203,6 +203,21 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
         # 出现错误时不更新情绪和关键内容
         print(f"全局状态分析出错: {str(e)}")
     
+    # 添加TTS配置到系统上下文
+    try:
+        # 获取TTS客户端实例
+        from app.protocols.tts import get_tts_client
+        tts_client = await get_tts_client()
+        
+        # 获取当前TTS配置
+        tts_config = tts_client.get_tts_config()
+        
+        # 将TTS配置添加到系统上下文
+        current_system_context.add("tts_config", tts_config)
+    except Exception as e:
+        # 出现错误时不更新TTS配置
+        print(f"获取TTS配置出错: {str(e)}")
+    
     return current_system_context
 
 
