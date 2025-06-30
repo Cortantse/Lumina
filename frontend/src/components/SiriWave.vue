@@ -322,7 +322,8 @@ let transitionProgress = 1.0;       // 颜色过渡的进度（0.0 -> 1.0）
  * - noise: 噪声成分，模拟语音的随机性
  * - pausePattern: 停顿模式，模拟说话时的间歇
  */
-function generateSimulatedSpeech(time: number): number {
+// @ts-ignore
+function generateSimulatedSpeech(time: number): number { 
   // 可调参数：基础频率 2.2，推荐范围 1.5~3.0
   const fundamental = Math.sin(time * 2.2) * 0.5 + 0.5;
   // 可调参数：谐波频率 4.5 和 7.8，推荐范围 3.0~10.0
@@ -341,7 +342,7 @@ const { onLoop } = useRenderLoop();
 onLoop(({ elapsed }: { elapsed: number }) => {
   if (!canvasRef.value) return;
   shader.uniforms.u_time.value = elapsed;
-  const sim = generateSimulatedSpeech(elapsed);
+  // const sim = generateSimulatedSpeech(elapsed);
 
   // ========== [状态管理重构] 状态切换逻辑 ==========
   // 1. 检测用户是否请求了新的模式

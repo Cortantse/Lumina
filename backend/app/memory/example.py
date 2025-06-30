@@ -79,7 +79,7 @@ async def _select_memory_type_interactive(prompt_message: str) -> Optional[Memor
             mem_types = [
                 MemoryType.TEXT,
                 MemoryType.COMMAND,
-        MemoryType.PREFERENCE,
+                MemoryType.PREFERENCE,
                 MemoryType.KNOWLEDGE,
                 MemoryType.INTERNAL
             ]
@@ -92,63 +92,104 @@ async def _select_memory_type_interactive(prompt_message: str) -> Optional[Memor
 
 async def store_memory_interactive(memory_manager: MemoryManager) -> None:
     """
-    交互式存储记忆。
+    交互式存储记忆 (支持多模态)。
     
     Args:
         memory_manager: 记忆管理器实例
     """
     print("\n===== 存储新记忆 =====")
     
-    # 获取记忆文本
-    content = await async_input("请输入记忆内容: ")
+    # 1. Get memory text/description
+    content = await async_input("请输入记忆内容或描述: ")
     if not content.strip():
-        print("记忆内容不能为空。操作取消。")
+        print("内容或描述不能为空。操作取消。")
         return
-        
-    # 选择记忆类型
-    selected_type = await _select_memory_type_interactive("请选择记忆类型")
-    if not selected_type:
-        print("未选择有效类型，使用默认类型 TEXT。")
-        selected_type = MemoryType.TEXT
-    
-    # 获取元数据
+
+    # 2. Ask to attach binary data
+    blob_data = None
+    mem_type = MemoryType.TEXT
     metadata = {}
-    add_metadata_str = await async_input("\n是否添加元数据? (y/n): ")
-    add_metadata = add_metadata_str.strip().lower() == 'y'
-    if add_metadata:
+    
+    attach_binary_choice = await async_input("\n是否附加二进制文件 (如图片、音频)? (y/n): ")
+    if attach_binary_choice.strip().lower() == 'y':
+        file_path = await async_input("请输入二进制文件路径: ")
+        if not os.path.exists(file_path):
+            print(f"文件不存在: {file_path}")
+            return
+            
+        try:
+            with open(file_path, 'rb') as f:
+                blob_data = f.read()
+            print(f"成功读取文件，大小: {len(blob_data)} 字节")
+        except Exception as e:
+            print(f"读取文件失败: {e}")
+            return
+        
+        print("\n请选择多模态记忆类型:")
+        print("1. 图像 (IMAGE)")
+        print("2. 音频 (AUDIO)")
+        type_choice = await async_input("\n请选择类型 [1-2]: ")
+        try:
+            type_num = int(type_choice)
+            if type_num == 1:
+                mem_type = MemoryType.IMAGE
+            elif type_num == 2:
+                mem_type = MemoryType.AUDIO
+            else:
+                print("无效选择，将使用默认类型 IMAGE。")
+                mem_type = MemoryType.IMAGE
+        except ValueError:
+            print("无效输入，将使用默认类型 IMAGE。")
+            mem_type = MemoryType.IMAGE
+
+        file_format = os.path.splitext(file_path)[1].lstrip('.')
+        metadata['format'] = file_format
+        metadata['file_size'] = str(len(blob_data))
+
+    else:
+        selected_type = await _select_memory_type_interactive("请选择文本记忆类型")
+        if not selected_type:
+            print("未选择有效类型，使用默认类型 TEXT。")
+        mem_type = selected_type or MemoryType.TEXT
+
+    # 3. Get additional metadata
+    add_metadata_str = await async_input("\n是否添加额外元数据? (y/n): ")
+    if add_metadata_str.strip().lower() == 'y':
         print("请输入元数据 (格式: 键=值, 每行一项, 空行结束):")
         while True:
             meta_line = await async_input("")
             if not meta_line:
                 break
-                
             if '=' in meta_line:
                 key, value = meta_line.split('=', 1)
                 metadata[key.strip()] = value.strip()
             else:
                 print(f"跳过无效格式: {meta_line}")
-    
-    # 存储记忆
+
+    # 4. Store memory
     print("\n正在存储记忆...")
     try:
         start_time = time.time()
         memory = await memory_manager.store(
-            content,
-            selected_type,
-            metadata=metadata
+            original_text=content,
+            mem_type=mem_type,
+            metadata=metadata,
+            blob_data=blob_data
         )
         elapsed = time.time() - start_time
         
-        # 添加到ID列表中
         stored_memory_ids.append(memory.vector_id)
         
         print(f"成功存储记忆 (耗时: {elapsed:.4f}秒)")
         print(f"记忆ID: {memory.vector_id}")
         print(f"类型: {memory.type}")
-        if metadata:
+        if memory.metadata:
             print("元数据:")
+            # Use memory.metadata directly as it is the final source of truth
             for k, v in memory.metadata.items():
-                print(f"  {k}: {v}")
+                # Avoid printing internal flags
+                if k not in ['is_parent', 'parent_id', 'child_type']:
+                     print(f"  {k}: {v}")
     except Exception as e:
         print(f"存储记忆失败: {e}")
 
@@ -189,7 +230,6 @@ async def query_memory_interactive(memory_manager: MemoryManager) -> None:
     try:
         start_time = time.time()
         
-        # 使用更新后的retrieve方法
         results = await memory_manager.retrieve(
             query,
             limit=limit,
@@ -198,23 +238,74 @@ async def query_memory_interactive(memory_manager: MemoryManager) -> None:
         
         elapsed = time.time() - start_time
         
-        # 显示结果
         print(f"\n找到 {len(results)} 条相关记忆 (耗时: {elapsed:.4f}秒):")
+        if not results:
+            print("未找到匹配的记忆。")
+            return
+
         for i, (memory, score) in enumerate(results):
-            print(f"\n{i+1}. [父文档] (最高分: {score:.4f})")
+            has_binary = memory.metadata.get('has_binary_data') == 'True'
+            binary_status = " (包含二进制数据)" if has_binary else ""
+
+            print(f"\n{i+1}. [父文档] (最高分: {score:.4f}){binary_status}")
             print(f"   内容: {memory.original_text}")
             print(f"   父文档ID: {memory.vector_id}")
             print(f"   时间戳: {memory.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            if has_binary and memory.blob_uri:
+                 print(f"   二进制引用: {memory.blob_uri}")
             
             if memory.metadata:
                 print("   元数据:")
-                # 过滤掉内部状态字段
-                filtered_meta = {k: v for k, v in memory.metadata.items() if k not in ['is_parent']}
-                for k, v in filtered_meta.items():
-                    print(f"     {k}: {v}")
+                filtered_meta = {
+                    k: v for k, v in memory.metadata.items() 
+                    if k not in ['is_parent', 'has_binary_data']
+                }
+                if filtered_meta:
+                    for k, v in filtered_meta.items():
+                        print(f"     {k}: {v}")
+                else:
+                    print("     (无额外元数据)")
         
-        if not results:
-            print("未找到匹配的记忆。")
+        memories_with_binary = [mem for mem, score in results if mem.metadata.get('has_binary_data') == 'True']
+        if memories_with_binary:
+            print("-" * 20)
+            select_str = await async_input("检测到结果中包含二进制数据，是否要获取？[输入记忆编号, 或按回车跳过]: ")
+            if select_str.strip():
+                try:
+                    select_idx = int(select_str) - 1
+                    if 0 <= select_idx < len(results):
+                        selected_memory, _ = results[select_idx]
+                        
+                        if selected_memory.metadata.get('has_binary_data') == 'True' and selected_memory.blob_uri:
+                            print(f"\n正在获取记忆 {selected_memory.vector_id} 的二进制数据...")
+                            binary_data = await memory_manager.get_binary_data(selected_memory)
+                            
+                            if binary_data:
+                                print(f"成功获取二进制数据，大小: {len(binary_data)} 字节")
+                                save_choice = await async_input("是否保存为文件? (y/n): ")
+                                if save_choice.strip().lower() == 'y':
+                                    file_format = selected_memory.metadata.get('format', 'bin')
+                                    default_filename = f"retrieved_data.{file_format}"
+                                    save_path = await async_input(f"请输入保存路径 (默认: {default_filename}): ")
+                                    if not save_path.strip():
+                                        save_path = default_filename
+                                    
+                                    try:
+                                        with open(save_path, 'wb') as f:
+                                            f.write(binary_data)
+                                        print(f"文件已保存至: {os.path.abspath(save_path)}")
+                                    except Exception as e:
+                                        print(f"保存文件失败: {e}")
+                            else:
+                                print("无法获取二进制数据。")
+                        else:
+                            print("所选记忆不包含二进制数据。")
+                    else:
+                        print("无效选择。")
+                except ValueError:
+                    print("无效输入，已跳过。")
+
     except Exception as e:
         print(f"查询记忆失败: {e}")
 
@@ -228,17 +319,13 @@ async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
     print("\n===== 测试被动记忆检索接口 =====")
     print("这个测试会模拟一个对话回合，并自动检索相关记忆。")
     
-    # 1. 获取用户当前的输入
     content = await async_input("请输入当前的对话内容 (例如 '我喜欢什么动物?') : ")
     if not content.strip():
         print("内容不能为空。操作取消。")
         return
 
-    # 2. 构造一个 ExpandedTurn
-    # 就像在真实流程中一样，它一开始没有检索到的记忆
     turn = ExpandedTurn(transcript=content)
     
-    # 3. 调用核心接口
     print("\n正在调用 add_retrieved_memories_to_context...")
     start_time = time.time()
     try:
@@ -249,7 +336,6 @@ async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
         print(f"调用接口时发生错误: {e}")
         return
 
-    # 4. 打印结果
     print(f"\n为输入 '{content}' 检索到 {len(turn.retrieved_memories)} 条相关记忆:")
     if not turn.retrieved_memories:
         print("-> 未检索到任何记忆。")
@@ -261,6 +347,7 @@ async def test_passive_retrieval_interactive(memory_manager: MemoryManager):
         print(f"   内容: {memory.original_text}")
         print(f"   ID: {memory.vector_id}")
         print(f"   时间: {memory.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"   二进制数据: {memory.blob_uri}")
 
 async def show_menu() -> int:
     """
@@ -272,7 +359,7 @@ async def show_menu() -> int:
     print("\n" + "=" * 40)
     print(" Lumina记忆系统交互式测试 ")
     print("=" * 40)
-    print("1. 存储新记忆")
+    print("1. 存储新记忆 (支持多模态)")
     print("2. 查询记忆")
     print("3. 清除所有记忆")
     print("4. 测试被动记忆检索")
@@ -291,17 +378,14 @@ async def main():
     """
     print("正在初始化记忆系统...")
     
-    # 获取记忆管理器实例
     memory_manager = await get_memory_manager()
     
-    # 等待嵌入模型加载完成
     if not memory_manager.embedding_service._is_ready:
         print("正在加载嵌入模型，请稍候...")
         memory_manager.embedding_service.wait_until_ready()
     
     print("记忆系统初始化完成！")
     
-    # 主菜单循环
     while True:
         choice = await show_menu()
         

@@ -32,8 +32,8 @@ async def is_ended_by_std(to_be_processed_turns: ToBeProcessedTurns, llm_context
     std 判断是否结束
     """
     # 避免循环导入
-    from app.llm.qwen_client import simple_semantic_turn_detection
-    return await simple_semantic_turn_detection(to_be_processed_turns.all_transcripts_in_current_turn[-1].transcript)
+    from app.std.llm_based import simple_semantic_turn_detection
+    return await simple_semantic_turn_detection(llm_context, to_be_processed_turns.all_transcripts_in_current_turn[-1].transcript)
 
   
 # --- 接口：记忆模块自动添加高度相关记忆 --- #

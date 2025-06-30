@@ -10,8 +10,8 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 # -- 路径设置结束 --
 
-from backend.app.memory.store import get_memory_manager
-from backend.app.protocols.memory import MemoryType
+from app.memory.store import get_memory_manager
+from app.protocols.memory import MemoryType
 
 async def main():
     """

@@ -57,7 +57,7 @@ async def send_tts_audio_stream(audio_stream: AsyncGenerator[Union[bytes, TTSRes
             pass
         return
 
-    print("[TTS发送器] 客户端已连接，开始发送TTS音频流。")
+    # print("[TTS发送器] 客户端已连接，开始发送TTS音频流。")
     try:
         # 收集所有PCM块合并后一次性发送
         all_pcm_chunks = []
