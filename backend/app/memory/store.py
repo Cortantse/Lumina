@@ -201,8 +201,8 @@ class FAISSMemoryStore(RetrievalMixin):
         original_text: str,
         mem_type: MemoryType,
         *,
-        metadata: Optional[Mapping[str, str]] = None,
-        blob_uri: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+        blob_data: Optional[bytes] = None,
     ) -> Memory:
         """
         在索引中存储新记忆，并将其作为一个后台任务运行，以避免阻塞主程序。
@@ -217,7 +217,7 @@ class FAISSMemoryStore(RetrievalMixin):
             original_text: 记忆的文本内容
             mem_type: 记忆的类型
             metadata: 关于记忆的附加信息
-            blob_uri: 关联二进制数据的 URI
+            blob_data: 直接存储的二进制数据（如图片、音频等）
             
         Returns:
             代表第一个父文档块的 Memory 对象。
@@ -225,6 +225,26 @@ class FAISSMemoryStore(RetrievalMixin):
         
         # 提前为第一个（或唯一的）父文档块生成ID，以便能立即返回正确的ID
         initial_parent_id = str(uuid.uuid4())
+        
+        # 如果提供了二进制数据，将其保存到磁盘
+        blob_filename = None
+        if blob_data is not None and self.persist_dir:
+            # 创建二进制数据存储目录
+            binary_dir = os.path.join(self.persist_dir, "binary_data")
+            os.makedirs(binary_dir, exist_ok=True)
+            
+            # 生成唯一文件名
+            blob_filename = f"{initial_parent_id}.bin"
+            blob_path = os.path.join(binary_dir, blob_filename)
+            
+            # 写入二进制数据
+            try:
+                with open(blob_path, 'wb') as f:
+                    f.write(blob_data)
+                logger.info(f"二进制数据已保存到 {blob_path}")
+            except Exception as e:
+                logger.error(f"保存二进制数据失败: {e}")
+                blob_filename = None
 
         async def _store_task(first_parent_id: str):
             # 1. 将原始文本分割成父文档（原文块）
@@ -274,12 +294,16 @@ class FAISSMemoryStore(RetrievalMixin):
                     ))
 
                 # c. 创建父文档的 Memory 对象
+                # 只有第一个父块才关联二进制数据
+                blob_uri_to_use = blob_filename if i == 0 and blob_filename else None
                 parent_memory = Memory(
                     original_text=parent_chunk,
                     type=mem_type,
                     vector_id=parent_id,
+                    blob_uri=blob_uri_to_use,
                     metadata={
                         "is_parent": "True",
+                        "has_binary_data": "True" if blob_uri_to_use else "False",
                         **(metadata or {})
                     }
                 )
@@ -330,8 +354,12 @@ class FAISSMemoryStore(RetrievalMixin):
         parent_memory_to_return = Memory(
             original_text=original_text,
             type=mem_type,
-            metadata=metadata,
-            vector_id=initial_parent_id
+            metadata={
+                **(metadata or {}),
+                "has_binary_data": "True" if blob_filename else "False"
+            },
+            vector_id=initial_parent_id,
+            blob_uri=blob_filename
         )
 
         # 将 _store_task 作为一个后台任务启动，并把预生成的ID传进去

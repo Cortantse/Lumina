@@ -103,7 +103,7 @@ class MemoryWriter(Protocol):
         mem_type: MemoryType,
         *,
         metadata: Optional[Mapping[str, Any]] = None,
-        blob_uri: Optional[str] = None,
+        blob_data: Optional[bytes] = None,
     ) -> Memory:
         ...  # 返回 Memory 以便链式操作和日志审计
 
@@ -205,4 +205,3 @@ class MemoryManager(MemoryWriter, MemoryReader, Protocol):
 # - LangChain 官方文档：https://python.langchain.com/docs/integrations/document_loaders/
 # - LlamaIndex 官方文档：https://docs.llamaindex.ai/en/stable/getting_started/starter_example.html
 # - OpenAI Cookbook for RAG: https://github.com/openai/openai-cookbook/blob/main/examples/RAG.md
-
