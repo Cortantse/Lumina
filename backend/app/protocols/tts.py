@@ -90,7 +90,7 @@ def extract_emotion_from_text(text: str) -> Tuple[str, TTSApiEmotion]:
         }
         emotion = emotion_map.get(emotion_str, TTSApiEmotion.NEUTRAL)
         
-        print(f"【TTS】从文本中提取到情绪标记: {emotion_str}, 对应枚举: {emotion.value}")
+        # print(f"【TTS】从文本中提取到情绪标记: {emotion_str}, 对应枚举: {emotion.value}")
         return cleaned_text, emotion
     
     # 没有找到情绪标记，返回原文本和默认情绪
@@ -559,19 +559,19 @@ class MiniMaxTTSClient(TTSClient):
         if api_emotion is None:
             cleaned_text, extracted_emotion = extract_emotion_from_text(text)
             if text != cleaned_text:  # 表示找到了情绪标记
-                text = cleaned_text
                 used_emotion = extracted_emotion
                 has_emotion_mark = True
-                print(f"【TTS】从文本中提取到情绪: {used_emotion.value}")
+                text = cleaned_text
+                # print(f"【TTS】从文本中提取到情绪: {used_emotion.value}")
             else:
                 # 文本中没有情绪标记，尝试使用上一句的情绪
                 if self.last_used_emotion:
                     used_emotion = self.last_used_emotion
-                    print(f"【TTS】使用上一句的情绪: {used_emotion.value}")
+                    # print(f"【TTS】使用上一句的情绪: {used_emotion.value}")
                 else:
                     # 没有上一句情绪，使用默认情绪
                     used_emotion = self.default_emotion
-                    print(f"【TTS】没有情绪标记和上一句情绪，使用默认情绪: {used_emotion.value}")
+                    # print(f"【TTS】没有情绪标记和上一句情绪，使用默认情绪: {used_emotion.value}")
         else:
             # 使用传入的情绪
             used_emotion = api_emotion
@@ -579,13 +579,13 @@ class MiniMaxTTSClient(TTSClient):
             if text.strip().startswith("["):
                 cleaned_text, _ = extract_emotion_from_text(text)
                 if text != cleaned_text:  # 表示找到了情绪标记
-                    text = cleaned_text
                     has_emotion_mark = True
+                    text = cleaned_text
         
         # 记住这次使用的情绪，供下次使用
         if has_emotion_mark:  # 只有当句子带有明确的情绪标记时才更新记忆
             self.last_used_emotion = used_emotion
-            print(f"【TTS】更新情绪记忆为: {used_emotion.value}")
+            # print(f"【TTS】更新情绪记忆为: {used_emotion.value}")
 
         ws = await self._establish_connection()
         if ws is None:
