@@ -2,6 +2,8 @@
 from typing import Optional
 from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, AgentResponseTurn
 from app.utils.request import send_request_async
+from app.llm.qwen_client import _global_to_be_processed_turns
+from app.core import config
 
 
 async def simple_semantic_turn_detection(llm_context: LLMContext, text: str) -> Optional[bool]:
@@ -13,6 +15,11 @@ async def simple_semantic_turn_detection(llm_context: LLMContext, text: str) -> 
     return:
         bool: 是否用户说完话了
     """
+
+    # 至少超过低静默时间，才进行语义判断
+    if _global_to_be_processed_turns.silence_duration < config.short_silence_timeout:
+        return False
+
     # 为语义判断创建一个新的LLMContext实例，避免污染主对话上下文
     semantic_context = LLMContext(
         system_prompt=f"你是一个语义完整性判断语音助手，你会通过用户的历史对话和你的记忆，判断用户此时是否说完话了，返回值只能为**一个字符** Y 或 N，表示用户是否说完话了。你会首先获得用户历史的历史和当轮你需要判断的文本，然后判断用户是否说完话了。"
