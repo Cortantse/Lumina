@@ -246,7 +246,8 @@ class FAISSMemoryStore(RetrievalMixin):
                 logger.error(f"保存二进制数据失败: {e}")
                 blob_filename = None
 
-        async def _store_task(first_parent_id: str):
+        async def _store_task(first_parent_id: str, blob_uri_for_task: Optional[str]):
+            """后台任务，负责实际的文本分块、向量化和存储。"""
             # 1. 将原始文本分割成父文档（原文块）
             parent_chunks = self.text_splitter.split_text(original_text)
             if not parent_chunks:
@@ -295,7 +296,7 @@ class FAISSMemoryStore(RetrievalMixin):
 
                 # c. 创建父文档的 Memory 对象
                 # 只有第一个父块才关联二进制数据
-                blob_uri_to_use = blob_filename if i == 0 and blob_filename else None
+                blob_uri_to_use = blob_uri_for_task if i == 0 else None
                 parent_memory = Memory(
                     original_text=parent_chunk,
                     type=mem_type,
@@ -362,8 +363,11 @@ class FAISSMemoryStore(RetrievalMixin):
             blob_uri=blob_filename
         )
 
-        # 将 _store_task 作为一个后台任务启动，并把预生成的ID传进去
-        asyncio.create_task(_store_task(initial_parent_id), name=f"store_memory_{initial_parent_id}")
+        # 将 _store_task 作为一个后台任务启动，并把预生成的ID和blob URI显式传进去
+        asyncio.create_task(
+            _store_task(initial_parent_id, blob_filename),
+            name=f"store_memory_{initial_parent_id}"
+        )
         logger.info("记忆存储任务已提交到后台运行。")
         
         return parent_memory_to_return

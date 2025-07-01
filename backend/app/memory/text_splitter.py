@@ -33,10 +33,8 @@ class RecursiveCharacterTextSplitter:
         self._separators = separators or [
             "\n\n",  # Paragraphs
             "\n",    # Lines
-            "。|！|？", # Chinese sentences
-            r"\. ",   # English sentences
-            "，",    # Chinese phrases
-            ",",     # English phrases
+            "。|！|？|；", # Chinese sentence terminators
+            r"\.|\?|!|;",   # English sentence terminators
             " ",     # Words
             "",      # Characters
         ]
