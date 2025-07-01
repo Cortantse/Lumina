@@ -44,3 +44,49 @@ class FileReader(Protocol):
             Memory对象，代表文档的一个分块
         """
         ... 
+
+"""
+使用指南：
+
+要处理并存储文件，请使用 app.file_reader.manager 模块中的 process_and_store_file 函数。
+这是处理文件的最简单方法，它会自动选择合适的文件读取器并将内容存储到记忆系统中。
+
+示例代码：
+
+```python
+import asyncio
+from app.file_reader.manager import process_and_store_file
+
+async def process_document_example():
+    # 处理文件
+    file_path = "path/to/your/document.pdf"  # 支持 .txt, .md, .pdf
+    
+    try:
+        # 处理并存储文件
+        result = await process_and_store_file(file_path)
+        
+        print(f"文件处理成功:")
+        print(f"- 文件名: {result['file_name']}")
+        print(f"- 文件大小: {result['file_size']} 字节")
+        print(f"- 文件格式: {result['file_format']}")
+        print(f"- 处理的块数: {result['chunks_processed']}")
+        
+    except Exception as e:
+        print(f"处理文件时出错: {e}")
+
+# 运行示例
+if __name__ == "__main__":
+    asyncio.run(process_document_example())
+```
+
+如果遇到索引问题，可以使用 memory_manager.clear() 重置索引：
+
+```python
+from app.memory.store import get_memory_manager
+
+async def reset_index():
+    memory_manager = await get_memory_manager()
+    await memory_manager.clear()
+    print("索引已重置")
+```
+""" 
