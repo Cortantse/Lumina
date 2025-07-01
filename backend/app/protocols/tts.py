@@ -202,7 +202,7 @@ class MiniMaxTTSClient(TTSClient):
         
         # 默认语音设置
         self.default_voice_id = DEFAULT_VOICE_ID
-        self.default_speed = 1.0  # 范围[0.5,2]
+        self.default_speed = 1.2  # 范围[0.5,2]
         self.default_volume = 1.0  # 范围(0,10]
         self.default_pitch = 0  # 范围[-12,12]
         self.default_emotion = TTSApiEmotion.NEUTRAL  # 默认情绪为中性
@@ -217,7 +217,7 @@ class MiniMaxTTSClient(TTSClient):
         """异步初始化方法"""
         # 初始化记忆客户端，但不再用于存储TTS配置
         await self._ensure_memory_client()
-        print("【TTS】初始化完成")
+        
 
     async def _ensure_memory_client(self):
         """确保记忆客户端已初始化"""

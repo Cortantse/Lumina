@@ -306,15 +306,15 @@ function handleSilenceEvent(event: CustomEvent) {
 // STT 结果
 function handleSttResult(event: CustomEvent) {
   const result = event.detail;
-  console.log('[调试-STT] 收到语音识别结果事件:', result);
+  // console.log('[调试-STT] 收到语音识别结果事件:', result);
   
   if (result && result.text) {
-    console.log(`[调试-STT] 文本内容: "${result.text}", 是否最终: ${result.isFinal}`);
+    // console.log(`[调试-STT] 文本内容: "${result.text}", 是否最终: ${result.isFinal}`);
     recognizedText.value = result.text;
     isTextFinal.value = result.isFinal;
     
     if (result.isFinal && result.text.trim()) {
-      console.log('[调试-STT] 添加到历史记录:', result.text);
+      //console.log('[调试-STT] 添加到历史记录:', result.text);
       textHistory.value.unshift(result.text);
       if (textHistory.value.length > 10) textHistory.value.pop();
     }

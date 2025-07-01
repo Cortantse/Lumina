@@ -1278,7 +1278,7 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
                     loop {
                         match stream.read(&mut temp_buffer) {
                             Ok(size) if size > 0 => {
-                                println!("[调试] 从STT结果Socket接收到{}字节数据", size);
+                                // println!("[调试] 从STT结果Socket接收到{}字节数据", size);
                                 buffer.extend_from_slice(&temp_buffer[0..size]);
                                 
                                 // 处理缓冲区中的完整消息（以换行符分隔）
@@ -1295,9 +1295,9 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
                                     match serde_json::from_slice::<SttResult>(&message_bytes) {
                                         Ok(result) => {
                                             if result.is_final {
-                                                println!("[重要] 收到STT最终结果: '{}'", result.text);
+                                                // println!("[重要] 收到STT最终结果: '{}'", result.text);
                                             } else {
-                                                println!("[重要] 收到STT中间结果: '{}'", result.text);
+                                                // println!("[重要] 收到STT中间结果: '{}'", result.text);
                                             }
                                             
                                             // 当收到非空文本时，向状态机发送BackendReturnText事件
@@ -1331,12 +1331,12 @@ async fn start_stt_result_listener(app_handle: tauri::AppHandle) -> Result<(), S
                                             }
                                             
                                             // 发送到前端
-                                            println!("[调试] 正在发送STT结果到前端: '{}' (最终: {})", 
-                                                     result.text, result.is_final);
+                                            // println!("[调试] 正在发送STT结果到前端: '{}' (最终: {})", 
+                                            //         result.text, result.is_final);
                                             if let Err(e) = app_handle_clone.emit("stt-result", &result) {
                                                 println!("[错误] 发送STT结果到前端失败: {}", e);
                                             } else {
-                                                println!("[调试] 已成功发送STT结果到前端");
+                                                // println!("[调试] 已成功发送STT结果到前端");
                                             }
                                         },
                                         Err(e) => {

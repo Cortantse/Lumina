@@ -102,7 +102,7 @@ class GlobalCommandAnalyzer:
                 {"role": "user", "content": prompt}
             ]
             
-            response, _, _ = await send_request_async(messages, "qwen-max-2025-01-25")
+            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
             
             # 清理和验证响应
             emotion = response.strip()
@@ -138,7 +138,7 @@ class GlobalCommandAnalyzer:
                 {"role": "user", "content": prompt}
             ]
             
-            response, _, _ = await send_request_async(messages, "qwen-max-2025-01-25")
+            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
             
             # 清理响应
             key_content = response.strip()
