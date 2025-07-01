@@ -87,7 +87,6 @@ class PipelineService:
         """异步初始化TTS客户端"""
         if not self.tts_client:
             try:
-                print("【调试】正在获取全局TTS客户端实例")
                 self.tts_client = await get_tts_client(self.tts_api_key)
                 print("【调试】获取TTS客户端成功")
             except Exception as e:
