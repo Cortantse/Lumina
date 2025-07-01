@@ -82,6 +82,11 @@ DialogueTurn = Union[ExpandedTurn, CompressedTurn, AgentResponseTurn, MultipleEx
 # --- 全局上下文 ---
 
 @dataclass
+class TimedItem:
+    value: Any
+    timestamp: float
+
+@dataclass
 class SystemContext:
     """
     以动态、可扩展的方式持有指导LLM行为的全局信息。
@@ -89,27 +94,58 @@ class SystemContext:
     提供一个灵活的字典来存储所有系统级指令，
     调用者可以直接管理这些指令。
     """
-    directives: Dict[str, Any] = field(default_factory=dict)
+    directives: Dict[str, List[TimedItem]] = field(default_factory=dict)
+    max_length: int = 5  # 每个指令最多保留5条历史
     """
-    一个灵活的字典，用于存储所有系统级指令。
+    一个结构化的多项历史指令容器，用于存储所有系统级上下文信息。
+    
+    每个 key 对应一个最多保留 5 条历史的列表，按时间倒序排列（新→旧），
+    用于模拟 LLM 的上下文记忆能力，支持逐步引导、多轮设定等高级功能。
+
     例如:
-    - {'persona': '你是一个专业的金融助手。'}
-    - {'user_preferences': {'language': 'zh', 'response_length': 'short'}}
-    - {'output_format': 'JSON'}
+    - 'persona': [
+        TimedItem("你是一个专业的金融助手。", timestamp),
+        TimedItem("你是一个生活咨询专家。", timestamp)
+      ]
+    
+    - 'user_preferences': [
+        TimedItem({'language': 'zh', 'tone': 'formal'}, timestamp),
+        TimedItem({'language': 'zh', 'response_length': 'short'}, timestamp)
+      ]
+    
+    - 'output_format': [
+        TimedItem("JSON", timestamp)
+      ]
     """
 
     def add(self, key: str, value: Any):
-        """添加或更新一个系统指令。"""
-        self.directives[key] = value
+        """添加或更新指令项，按时间倒序排列，保留最多 max_length 条"""
+        item = TimedItem(value=value, timestamp=time.time())
+        
+        # 特殊处理tts_config，直接替换而不是添加到列表
+        if key == "tts_config":
+            self.directives[key] = [item]  # 仅保留最新的tts_config
+            return
+            
+        # 常规处理其他指令
+        if key not in self.directives:
+            self.directives[key] = []
+        self.directives[key].insert(0, item)  # 新值放前面
+        if len(self.directives[key]) > self.max_length:
+            self.directives[key] = self.directives[key][:self.max_length]
 
     def format(self) -> str:
-        """将所有指令格式化为单个字符串，以便注入到提示中。"""
+        """格式化为注入 LLM 的提示词，按时间降序输出"""
         if not self.directives:
             return ""
         
-        formatted_directives = "\\n".join(f"- {key}: {value}" for key, value in self.directives.items())
-        return f"--- 当前时刻的系统状态，请你关注 ---\\n{formatted_directives}\\n--- 对话开始 ---"
-
+        result_lines = ["--- 当前系统状态（越上方表示越新） ---"]
+        for key, history in self.directives.items():
+            for idx, item in enumerate(history):
+                timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(item.timestamp))
+                result_lines.append(f"- [{key}] 第 {idx+1} 条（{timestamp_str}）：{item.value}")
+        result_lines.append("--- 对话开始 ---")
+        return "\n".join(result_lines)
 
 # --- 提供给LLM的最终载荷 ---
 

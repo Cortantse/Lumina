@@ -212,19 +212,12 @@ class MiniMaxTTSClient(TTSClient):
         
         # 记忆客户端，延迟初始化
         self.memory_client = None
-        # 初始化时不立即存储配置，移到异步initialize方法中
 
     async def initialize(self) -> None:
-        """异步初始化方法，用于存储TTS初始配置到记忆系统"""
-        # 初始化记忆客户端
+        """异步初始化方法"""
+        # 初始化记忆客户端，但不再用于存储TTS配置
         await self._ensure_memory_client()
-        
-        # 存储默认配置到记忆系统
-        await self._store_tts_config_to_memory("voice", "默认音色")
-        await self._store_tts_config_to_memory("speed", 1.0)
-        await self._store_tts_config_to_memory("volume", 1.0)
-        await self._store_tts_config_to_memory("pitch", 0)
-        print("【TTS】初始配置已存储到记忆系统")
+        print("【TTS】初始化完成")
 
     async def _ensure_memory_client(self):
         """确保记忆客户端已初始化"""
@@ -237,49 +230,28 @@ class MiniMaxTTSClient(TTSClient):
                 return False
         return True
 
-    async def _store_tts_config_to_memory(self, config_type: str, value: Any, display_name: str = None):
+    def get_tts_config(self) -> Dict[str, Any]:
         """
-        将TTS配置信息存储到记忆系统
+        获取当前TTS配置信息，用于存储到系统上下文
         
-        Args:
-            config_type: 配置类型，如'voice'、'speed'、'pitch'、'volume'
-            value: 配置值
-            display_name: 显示名称，用于更友好的描述
+        Returns:
+            Dict[str, Any]: 包含当前TTS配置的字典
         """
-        if not await self._ensure_memory_client():
-            print("【TTS警告】未能初始化记忆客户端，TTS配置未保存到记忆中")
-            return
-        
-        try:
-            # 准备记忆内容
-            if config_type == "voice":
-                memory_content = f"当前TTS音色设置为: {display_name or value}"
-            elif config_type == "speed":
-                memory_content = f"当前TTS语速设置为: {value}"
-            elif config_type == "volume":
-                memory_content = f"当前TTS音量设置为: {value}"
-            elif config_type == "pitch":
-                memory_content = f"当前TTS音调设置为: {value}"
-            else:
-                memory_content = f"当前TTS{config_type}设置为: {value}"
-            
-            # 存储到记忆系统
-            await self.memory_client.store(
-                original_text=memory_content,
-                mem_type=MemoryType.PREFERENCE,
-                metadata={
-                    "source": "tts_config",
-                    "auto_stored": "true",
-                    "config_type": config_type,
-                    "config_value": str(value)
-                }
-            )
-            print(f"【TTS】已将配置存入记忆: {memory_content}")
-        except Exception as e:
-            print(f"【TTS错误】存储配置到记忆系统失败: {str(e)}")
+        # 查找音色对应的人类可读名称
+        voice_display_name = "默认音色"
+        for name, vid in ALLOWED_VOICE_IDS.items():
+            if vid == self.default_voice_id:
+                voice_display_name = name
+                break
+                
+        return {
+            "voice_name": voice_display_name,
+            "speed": self.default_speed,
+            "volume": self.default_volume,
+        }
 
     async def set_voice(self, voice_id: str) -> None:
-        """设置默认语音ID并保存到记忆中"""
+        """设置默认语音ID"""
         voice_id = voice_id.strip()
         display_name = None
         print(f"【TTS】设置语音ID: {voice_id}")
@@ -294,49 +266,40 @@ class MiniMaxTTSClient(TTSClient):
         if voice_id not in allowed_values and voice_id != DEFAULT_VOICE_ID:
             print(f"警告: voice_id {voice_id} 不在允许列表，使用默认值 {DEFAULT_VOICE_ID}")
             self.default_voice_id = DEFAULT_VOICE_ID
-            await self._store_tts_config_to_memory("voice", DEFAULT_VOICE_ID)
         else:
             self.default_voice_id = voice_id
-            await self._store_tts_config_to_memory("voice", voice_id, display_name)
     
     async def set_emotion(self, emotion: TTSApiEmotion) -> None:
-        """设置默认情绪并保存到记忆中"""
+        """设置默认情绪"""
         self.default_emotion = emotion
-        # await self._store_tts_config_to_memory("emotion", emotion.value, emotion.name)
         print(f"【TTS】设置默认情绪为: {emotion.name} ({emotion.value})")
         
     async def set_speed(self, speed: float) -> None:
-        """设置默认语速并保存到记忆中"""
+        """设置默认语速"""
         if 0.5 <= speed <= 2.0:
             self.default_speed = speed
-            await self._store_tts_config_to_memory("speed", speed)
         else:
             print(f"警告: 语速 {speed} 超出范围 [0.5, 2.0]，使用默认值 1.0")
             self.default_speed = 1.0
-            await self._store_tts_config_to_memory("speed", 1.0)
             
     async def set_volume(self, volume: float) -> None:
-        """设置默认音量并保存到记忆中"""
+        """设置默认音量"""
         if 0 < volume <= 10.0:
             self.default_volume = volume
-            await self._store_tts_config_to_memory("volume", volume)
         else:
             print(f"警告: 音量 {volume} 超出范围 (0, 10.0]，使用默认值 1.0")
             self.default_volume = 1.0
-            await self._store_tts_config_to_memory("volume", 1.0)
             
     async def set_pitch(self, pitch: int) -> None:
-        """设置默认音调并保存到记忆中"""
+        """设置默认音调"""
         if -12 <= pitch <= 12:
             self.default_pitch = pitch
-            await self._store_tts_config_to_memory("pitch", pitch)
         else:
             print(f"警告: 音调 {pitch} 超出范围 [-12, 12]，使用默认值 0")
             self.default_pitch = 0
-            await self._store_tts_config_to_memory("pitch", 0)
     
     async def set_style(self, style_params: Dict[str, Any]) -> None:
-        """设置语音风格参数并保存到记忆中
+        """设置语音风格参数
         
         Args:
             style_params: 包含风格参数的字典，可以包含以下键:
@@ -345,7 +308,7 @@ class MiniMaxTTSClient(TTSClient):
                 - volume: 音量
                 - pitch: 音调
         """
-        # 记录所有修改项，用于保存到记忆
+        # 记录所有修改项，用于日志
         changes = []
         
         if "voice_id" in style_params:
@@ -364,20 +327,10 @@ class MiniMaxTTSClient(TTSClient):
             await self.set_pitch(style_params["pitch"])
             changes.append(f"音调为{style_params['pitch']}")
             
-        # 如果有多项更改，保存一个综合记忆
+        # 如果有多项更改，记录一个综合日志
         if len(changes) > 1:
-            if await self._ensure_memory_client():
-                memory_content = f"更新了TTS多项设置: {', '.join(changes)}"
-                await self.memory_client.store(
-                    original_text=memory_content,
-                    mem_type=MemoryType.PREFERENCE,
-                    metadata={
-                        "source": "tts_config_multiple",
-                        "auto_stored": "true",
-                        "changes_count": len(changes)
-                    }
-                )
-    
+            print(f"【TTS】更新了TTS多项设置: {', '.join(changes)}")
+
     # 添加情绪处理的同步方法
     def set_emotion_sync(self, emotion: TTSApiEmotion) -> None:
         """同步版的设置默认情绪"""
