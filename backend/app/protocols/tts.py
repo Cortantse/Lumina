@@ -41,7 +41,6 @@ async def get_tts_client(api_key: Optional[str] = None) -> "MiniMaxTTSClient":
     global _tts_client_instance
     if _tts_client_instance is None:
         _tts_client_instance = MiniMaxTTSClient(api_key)
-        await _tts_client_instance.initialize()
         print("【TTS】创建全局TTS客户端实例")
     return _tts_client_instance
 
@@ -210,26 +209,6 @@ class MiniMaxTTSClient(TTSClient):
         # 记忆上一句的情绪
         self.last_used_emotion = None
         
-        # 记忆客户端，延迟初始化
-        self.memory_client = None
-
-    async def initialize(self) -> None:
-        """异步初始化方法"""
-        # 初始化记忆客户端，但不再用于存储TTS配置
-        await self._ensure_memory_client()
-        print("【TTS】初始化完成")
-
-    async def _ensure_memory_client(self):
-        """确保记忆客户端已初始化"""
-        if self.memory_client is None:
-            try:
-                self.memory_client = await get_memory_manager()
-                print("【TTS】记忆客户端初始化成功")
-            except Exception as e:
-                print(f"【TTS错误】记忆客户端初始化失败: {str(e)}")
-                return False
-        return True
-
     def get_tts_config(self) -> Dict[str, Any]:
         """
         获取当前TTS配置信息，用于存储到系统上下文
