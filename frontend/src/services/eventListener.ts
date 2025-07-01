@@ -47,7 +47,7 @@ class EventListenerService {
       
       // 监听来自Rust后端的STT结果
       const sttCleanup = await tauriApi.listen('stt-result', (event: any) => {
-        logDebug('收到STT结果', event);
+        // logDebug('收到STT结果', event);
         
         // 全局事件，App.vue或组件可以使用window.dispatchEvent监听
         window.dispatchEvent(new CustomEvent('stt-result', { 

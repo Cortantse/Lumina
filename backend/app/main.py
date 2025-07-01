@@ -1,6 +1,15 @@
 # app/main.py 主函数，FastAPI + Websocket 启动入口
 import os
 import asyncio
+
+# --- Start of import path fix ---
+try:
+    from app.utils.clean_file import clean_imports
+    clean_imports()
+except Exception as e:
+    print(f"清理导入语句失败: {e}")
+
+
 from typing import Dict
 
 # 不要动，必须在这一步解密api_keys.json中的密钥到环境变量中
@@ -21,6 +30,8 @@ from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
+# 全局服务实例
+import app.global_vars as global_vars
 
 # 加载环境变量
 load_dotenv()
@@ -37,10 +48,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 全局服务实例
-pipeline_service = None
-websocket_handler = None
-socket_handler = None
 
 
 @app.on_event("startup")
@@ -68,21 +75,22 @@ async def startup_event():
     }
     
     # 初始化Pipeline服务
-    pipeline_service = PipelineService(stt_config=stt_config, tts_api_key=tts_api_key)
-    pipeline_service.start()
+    global_vars.pipeline_service = PipelineService(stt_config=stt_config, tts_api_key=tts_api_key)
+    global_vars.pipeline_service.start()
     
     # 初始化API模块
-    initialize_audio_api(pipeline_service)
+    initialize_audio_api(global_vars.pipeline_service)
     
     # 初始化TTS Socket服务器
     await initialize_tts_socket()
     
     # 使用protocols/stt.py中的工厂函数初始化WebSocket处理器
-    websocket_handler = create_websocket_handler(stt_client=pipeline_service.stt_client)
+    global_vars.websocket_handler = create_websocket_handler(stt_client=global_vars.pipeline_service.stt_client)
     
     # 使用protocols/stt.py中的工厂函数初始化Socket处理器
-    socket_handler = create_socket_handler(stt_client=pipeline_service.stt_client)
-    asyncio.create_task(socket_handler.start())
+    global_vars.socket_handler = create_socket_handler(stt_client=global_vars.pipeline_service.stt_client)
+    asyncio.create_task(global_vars.socket_handler.start())
+
 
 
 @app.on_event("shutdown")
