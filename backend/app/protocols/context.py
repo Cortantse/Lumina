@@ -158,7 +158,6 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
     
     # 检测可能的命令
     command_result = await command_detector.detect_command(transcript)
-    # print(f"【调试】command_result: {command_result}")
     
     # 准备空的记忆列表
     memories = []
@@ -201,7 +200,6 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
             elif command_tools_result.type.value == "PREFERENCE":
                 # 执行命令
                 execution_result = await executor_manager.execute_command(command_tools_result)
-                # print(f"【调试】执行偏好设置命令，返回结果: {execution_result}")
                 
                 # 处理偏好设置结果，更新系统上下文
                 if execution_result.get("success", True):
@@ -221,14 +219,14 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
 
 
 # --- 接口：获得全局状态 --- #
-async def get_global_status(current_system_context: SystemContext, to_be_processed_turn: ExpandedTurn) -> SystemContext:
+async def get_global_status(current_system_context: SystemContext, to_be_processed_turns: ToBeProcessedTurns) -> SystemContext:
     """
     这里只给到之前的全局状态，由浩斌直接给出新的全局状态作为替换
     其它参数请自行获取
 
     args:
         current_system_context: 当前的全局状态
-        to_be_processed_turn: 当前待处理的转录文本
+        ToBeProcessedTurns: 当前待处理的转录文本
 
     returns:
         SystemContext: 全新的全局状态
@@ -239,19 +237,18 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
     # 初始化GlobalCommandAnalyzer
     global_analyzer = GlobalCommandAnalyzer()
     
-    # 直接使用当前上下文对象，不再创建新的对象
-    # 这样可以保证所有已设置的偏好都会被保留
+    # 获取所有待处理的转录文本
+    all_transcripts = to_be_processed_turns.all_transcripts_in_current_turn
     
-    # 获取当前处理的转录文本
-    current_transcript = to_be_processed_turn.transcript
+    # 将所有转录文本合并为一个完整的文本进行分析
+    combined_text = " ".join([turn.transcript for turn in all_transcripts])
     
     try:
-        # 分析当前转录的情绪和关键内容
-        analysis_result = await global_analyzer.analyze_text(current_transcript)
+        # 分析合并后文本的情绪和关键内容
+        analysis_result = await global_analyzer.analyze_text(combined_text)
         
         # 更新系统上下文中的情绪和关键内容
         current_system_context.add("user_emotion", analysis_result["emotion"])
-        current_system_context.add("key_content", analysis_result["key_content"])
     except Exception as e:
         # 出现错误时不更新情绪和关键内容
         print(f"全局状态分析出错: {str(e)}")
@@ -287,6 +284,7 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
     """
     # 浩斌应该对未处理文本的 **当前轮**的 信息进行处理，并添加到 **当前轮** 的上下文，即 to_be_processed_turns[-1]
     # 但是我这里提供了所有未处理的转录文本和所有历史上下文，浩斌可以作为相关上下文，也可以不使用
+
 
 
     try:

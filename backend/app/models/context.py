@@ -134,7 +134,7 @@ class SystemContext:
         item = TimedItem(value=value, timestamp=time.time())
         
         # 特殊处理tts_config，直接替换而不是添加到列表
-        if key == "tts_config":
+        if key == "tts_config" or key == "user_emotion":
             self.directives[key] = [item]  # 仅保留最新的tts_config
             return
             

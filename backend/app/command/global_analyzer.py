@@ -35,15 +35,6 @@ class GlobalCommandAnalyzer:
 文本: "{text}"
 """
 
-        self.key_content_prompt_template = """
-分析以下文本的关键内容。如果文本包含非文本回答的内容（如询问你是什么模型、谁创建了你等身份问题），请回复简短。
-如果是普通内容，请提取并简要总结核心要点（不超过20个字）。
-
-请只回复关键内容，不要添加任何解释。
-
-文本: "{text}"
-"""
-
     
     async def analyze_text(self, text: str) -> Dict[str, Any]:
         """
@@ -53,18 +44,14 @@ class GlobalCommandAnalyzer:
             text: 输入文本
             
         Returns:
-            分析结果，包含情绪和关键内容
+            分析结果，包含情绪
         """
         try:
             # 分析情绪
             emotion = await self._analyze_emotion(text)
             
-            # 分析关键内容
-            key_content = await self._analyze_key_content(text)
-            
             result = {
                 "emotion": emotion,
-                "key_content": key_content
             }
             
             logger.info(f"全局分析结果: {result}")
@@ -115,35 +102,4 @@ class GlobalCommandAnalyzer:
         except Exception as e:
             logger.error(f"情绪分析错误: {str(e)}")
             return "中性"
-    
-    async def _analyze_key_content(self, text: str) -> str:
-        """
-        分析文本的关键内容
-        
-        Args:
-            text: 输入文本
-            
-        Returns:
-            关键内容
-        """
-        try:
-            from app.llm.qwen_client import send_request_async
-            
-            # 构建提示词
-            prompt = self.key_content_prompt_template.format(text=text)
-            
-            # 发送请求
-            messages = [
-                {"role": "system", "content": "你是一个专业的文本内容分析助手，请分析用户文本的关键内容。"},
-                {"role": "user", "content": prompt}
-            ]
-            
-            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
-            
-            # 清理响应
-            key_content = response.strip()
-            return key_content
-            
-        except Exception as e:
-            logger.error(f"关键内容分析错误: {str(e)}")
-            return "无法分析关键内容" 
+
