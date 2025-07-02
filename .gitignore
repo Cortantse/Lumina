@@ -19,3 +19,4 @@ node_modules/
 /data
 backend/app/utils/api_status_cache.json
 /backend/app/utils/api_status_cache.json
+/backend/screenshots

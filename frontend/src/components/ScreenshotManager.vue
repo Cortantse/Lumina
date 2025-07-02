@@ -37,28 +37,28 @@ function startAutomaticScreenshots() {
   // 每分钟执行一次
   screenshotInterval = setInterval(async () => {
     try {
-      // 直接捕获并发送主屏幕截图
-      await screenshotService.captureAndSendDirectly();
+      // 捕获、保存并发送主屏幕截图
+      await screenshotService.captureAndSendToServer();
       
-      console.log('自动截图已完成并发送');
+      console.log('自动截图已完成、保存并发送');
     } catch (error) {
       console.error('自动截图失败:', error);
     }
   }, 60000); // 60000毫秒 = 1分钟
   
   // 立即执行一次
-  captureAndSendDirectly();
+  captureAndSendToServer();
 }
 
 /**
- * 直接捕获并发送一次截图
+ * 捕获、保存并发送一次截图
  */
-async function captureAndSendDirectly() {
+async function captureAndSendToServer() {
   try {
-    await screenshotService.captureAndSendDirectly();
-    console.log('截图已完成并直接发送');
+    const screenshotPath = await screenshotService.captureAndSendToServer();
+    console.log('截图已完成、保存并发送，路径:', screenshotPath);
   } catch (error) {
-    console.error('截图并发送失败:', error);
+    console.error('截图、保存并发送失败:', error);
   }
 }
 
@@ -75,7 +75,7 @@ function initWebSocketHandlers() {
       console.log('收到WebSocket截图请求');
       
       // 执行截图
-      await captureAndSendDirectly();
+      await captureAndSendToServer();
       
       // 发送确认消息
       websocketService.sendMessage({

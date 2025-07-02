@@ -13,6 +13,10 @@
     "core:menu:default",
     "core:tray:default",
     "core:window:allow-set-title",
-    "screenshots:default"
+    "screenshots:default",
+    "fs:default",
+    "fs:allow-appdata-read",
+    "fs:allow-appdata-write",
+    "fs:scope-appdata-recursive"
   ]
 }

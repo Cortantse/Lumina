@@ -7,7 +7,7 @@ export const websocketService = {
   ws: null as WebSocket | null,
   isConnected: ref(false),
   messageHandlers: new Map<string, Function>(),
-  WEBSOCKET_URL: 'ws://127.0.0.1:8001/screenshot-ws',
+  WEBSOCKET_URL: 'ws://127.0.0.1:8000/screenshot-ws',
   
   /**
    * 初始化WebSocket连接
