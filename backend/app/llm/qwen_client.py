@@ -156,8 +156,10 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
             full_response += chunk
             current_sentence += chunk
             
+
             # 尝试使用句末标点分割句子
             found_any = False
+
             for end_mark in sentence_end_marks:
                 found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
                 while found:
