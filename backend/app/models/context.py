@@ -262,7 +262,7 @@ class LLMContext:
         将展开的回合转换为结构化字符串，移除调试信息
         """
         # 直接使用用户的转录文本作为基础内容
-        user_part = turn.transcript
+        user_part = f"用户: `{turn.transcript}`"
         
         # 添加图片信息（如果有）
         if turn.image_inputs:

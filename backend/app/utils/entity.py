@@ -36,6 +36,7 @@ class TemplateRequest:
             "plus": "qwen-plus-0305",
             "turbo-new": "qwen-turbo-latest",
             "tongyi-intent-detect-v3": "tongyi-intent-detect-v3",
+            "qwen-plus-latest": "qwen-plus-latest",
         }
     }
 

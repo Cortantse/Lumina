@@ -301,7 +301,7 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
             add_retrieved_memories_to_context_by_instruction(to_be_processed_turn, llm_context)
         )
         new_system_context = asyncio.create_task(
-            get_global_status(llm_context.system_context, to_be_processed_turn)
+            get_global_status(llm_context.system_context, to_be_processed_turns)
         )
 
         # 一起等待两者

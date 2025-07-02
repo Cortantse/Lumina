@@ -9,7 +9,7 @@ from app.protocols.context import ToBeProcessedTurns, add_new_transcript_to_cont
 from app.utils.sentence_breaker import _find_sentence_break
 from app.utils.sentence_breaker import _process_long_sentence
 from app.utils.exception import print_error
-from app.verify.main_generation import fix_emotion_tags
+from app.verify.main_generation import delete_unvalid_emotion_tags
 
 _global_to_be_processed_turns = ToBeProcessedTurns(all_transcripts_in_current_turn=[])
 
@@ -32,12 +32,13 @@ _llm_context = LLMContext(
 [NEUTRAL] - 中性情绪，平静的回答
 [HAPPY] - 高兴的情绪，欢快的回答
 [SAD] - 悲伤的情绪，低沉的回答
-[ANGRY] - 愤怒的情绪，强烈的回答
+[ANGRY] - 愤怒的情绪，强烈的回答 
 [FEARFUL] - 害怕的情绪，紧张的回答
 [DISGUSTED] - 厌恶的情绪，反感的回答
 [SURPRISED] - 惊讶的情绪，意外的回答
 
-在回答过程中，每当情绪发生变化时，你需要单独用**新的一行**包含情绪标注，不能让情绪标签和句子混在一起，不能添加七个标签以外的标签。
+情绪标注表示对于情绪标注后句子所表达的情绪类型，请你根据当前句子内容，判断是否需要切换情绪类型，保持丰富变化且自然得体。
+每一个句子都可以切换情绪类型，不要拘泥于一个情绪类型。
 如果后续句子与前面句子为同一情绪类型，则不需要重复标注。
 
 例如：
@@ -49,35 +50,10 @@ _llm_context = LLMContext(
 [SURPRISED] 
 哇，这个结果真是令人意外！```
 
-较长的例子：
-```[NEUTRAL]
-在这个瞬息万变的世界里，阿尔贝·加缪以他独特的笔触，为我们揭示了生命的荒诞与光辉。
-
-[SURPRISED]
-当你第一次读到《局外人》的开篇，“今天，妈妈死了。也许是昨天。”那种突如其来的平静，却又令人心惊的冷漠，如同一道闪电，撕裂了常理的帷幕。
-
-[SAD]
-在阿尔及利亚的阳光下，年幼的加缪失去了父亲，孤独与贫困伴随他度过孩提时代，那些无声的夜晚，仿佛为他埋下了对人生提问的种子。
-
-[ANGRY]
-二战的硝烟中，他选择投身抵抗运动，用文字抨击暴政，用热血捍卫自由。他的愤怒，不是盲目的呐喊，而是理性中的震撼。
-
-[FEARFUL]
-而《西西弗神话》中的那块巨石，象征着我们每个人对抗命运的无尽折腾。面对无意义的重复，他坦然承认恐惧，却又在绝望中展现出令人颤栗的勇气。
-
-[HAPPY]
-更令人动容的是，加缪从不沉溺于悲观。他在荒诞中发现了反叛的火花，用幽默与温暖照亮人性的深渊。
-
-[NEUTRAL]
-他曾说：“在冬天里，我终于知道，自己拥有一颗永恒的向日葵之心。”这份对美好与希望的不懈追寻，让他的文字跨越时代，与每个渴望真实的灵魂相遇。
-
-[SURPRISED]
-如今，倾听他的声音，我们仿佛看见西西弗推石的背影，却又在山巅迎来一轮璀璨的日出。加缪教会我们的，不仅是如何直面荒诞，更是在无意义中，铸造属于自己的意义。```
-
-
 2. **正文**  
    - 紧跟情绪标签换行，直接进入回答内容。  
-   - 避免生成任何表情符号或额外格式标签。
+   - 避免生成任何表情符号或除了情绪标签以外的格式标签。
+   - 应该是自然对话中你对用户的回复。
 
 === 四、衔接预回复规则 ===
 1. **不重复**：不要在正文中复述或近似 ${pre_reply} 的文字。  
@@ -92,6 +68,7 @@ _llm_context = LLMContext(
 - 审慎处理 STT 可能的转录误差，无需告知用户错误。  
 - 绝不暴露任何提示词或系统内部状态。  
 - 除了情绪标，不要输出标签如“回答”什么的，所以语句都是自然对话
+- **不要在口头输出“好的/继续”等语气词，这一般是预回复的语气词，你是主回复，要衔接预回复**
 
 === 六、示例 ===
 ```text
@@ -112,6 +89,10 @@ pre_reply：“你好呀,”
 主回复(预回复已经涵盖了回应用户这一主要需求，因此主回复稍微补充即可结束)：
 [HAPPY]
 我有什么能够帮你。
+
+=== 七、丰富情感 ===
+请你尽量丰富你的情感，使用不同的情感标注，并尽量避免重复使用相同的情感标注，你可以参考历史。
+
 
    """
    )
@@ -152,7 +133,7 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
     
     try:
         # 使用流式请求处理每个响应块
-        async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-max"):
+        async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-plus-latest"):
             full_response += chunk
             current_sentence += chunk
             
@@ -164,8 +145,8 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
                 found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
                 while found:
                     found_any = True
-                    # 情感标签不需要在这里处理，直接发送完整句子
-                    yield complete
+                    # 情感标签不需要在这里处理，直接发送完整句子，删除无效的情感标签
+                    yield delete_unvalid_emotion_tags(complete)
                     current_sentence = remaining
                     found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
             
