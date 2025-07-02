@@ -92,21 +92,8 @@ class CommandDetector:
             intent = await self.intent_detector.detect_fast_intent(text, self.fast_intent_dict)
             if intent and intent in self.fast_intent_to_command_type:
                 command_type = self.fast_intent_to_command_type[intent]
-                # print(f"【调试】command_type: {command_type}")
                 if command_type != CommandType.NONE:
-                    # print(f"Intent detector found command type: {command_type}")
-                    
-                    # 偏好命令特殊处理：使用大模型总结记忆而不是工具调用
-                    # if command_type == CommandType.PREFERENCE:
-                    #     print(f"【处理偏好命令】检测到偏好相关命令，将使用大模型总结并存储记忆")
-                    #     # 创建基本的命令结果，处理逻辑交给executor执行
-                    #     return CommandResult(
-                    #         command_type=CommandType.PREFERENCE,
-                    #         action="preference_memory",
-                    #         params={"original": text, "source": "user"},
-                    #         confidence=0.9
-                    #     )
-                    
+                  
                     # 其他命令类型，返回基本的命令结果
                     return CommandResult(
                         command_type=command_type,
@@ -120,50 +107,6 @@ class CommandDetector:
         
         # 如果没有检测到命令，返回NONE类型
         return CommandResult(CommandType.NONE)
-    
-    async def detect_command_with_tools(self, text: str) -> Optional[CommandResult]:
-        """
-        使用工具调用进行详细的命令检测
-        
-        Args:
-            text: 输入文本
-            
-        Returns:
-            命令结果对象或None
-        """
-        try:
-            # 使用意图检测器检测工具调用
-            result = await self.intent_detector.detect_intent_and_tool_call(text, self.command_tools)
-            
-            # 检查返回结果中是否包含工具调用
-            if result and result.get("tool_call"):
-                tool_calls = result["tool_call"]
-                
-                # 如果只有一个工具调用
-                if isinstance(tool_calls, list) and len(tool_calls) == 1:
-                    tool = tool_calls[0]
-                    command_result = self._create_command_result_from_tool(tool)
-                    if command_result:
-                        return command_result
-                
-                # 如果有多个工具调用，创建多个CommandResult并合并
-                elif isinstance(tool_calls, list) and len(tool_calls) > 1:
-                    print(f"【调试】检测到多个工具调用: {len(tool_calls)}个")
-                    
-                    command_results = []
-                    for tool in tool_calls:
-                        command_result = self._create_command_result_from_tool(tool)
-                        if command_result:
-                            command_results.append(command_result)
-                    
-                    if command_results:
-                        # 合并多个CommandResult
-                        return self._merge_command_results(command_results)
-            
-            return None
-        except Exception as e:
-            logger.error(f"Error in tool-based command detection: {str(e)}")
-            return None
     
     async def detect_tool_call(self, text: str) -> Optional[CommandResult]:
         """
