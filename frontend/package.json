@@ -16,6 +16,7 @@
     "@tresjs/core": "^4.3.6",
     "@types/three": "^0.177.0",
     "postprocessing": "^6.37.3",
+    "tauri-plugin-screenshots-api": "^2.2.0",
     "three": "^0.176.0",
     "vue": "^3.5.13"
   },

@@ -7,6 +7,11 @@ use std::time::{Duration, Instant};
 use std::thread;
 use tokio;
 use base64::{Engine as _, engine::general_purpose};
+// use tauri::Manager;
+// use tauri_plugin_screenshots::PluginBuilder;
+// use std::fs::File;
+// use std::path::PathBuf;
+// use anyhow;
 
 // 平台特定导入
 #[cfg(unix)]
@@ -1864,12 +1869,29 @@ async fn get_vad_state() -> Result<String, String> {
     Ok(state_str.to_string())
 }
 
+// #[tauri::command]
+// async fn capture_and_send() -> anyhow::Result<()> {
+//     let buf: Box<[u8]> = capture_monitor(0)
+//     .await
+//     .map_err(|e| e.to_string())?;
+
+//   let mut path = dirs::desktop_dir().unwrap_or_else(|| PathBuf::from("."));
+//   path.push("screenshot.png");
+
+//   let mut file = File::create(path).map_err(|e| e.to_string())?;
+//   file.write_all(&buf).map_err(|e| e.to_string())?;
+
+//   Ok(())
+// }
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("[信息] Lumina VAD 应用启动中...");
     
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_screenshots::init())
         .invoke_handler(tauri::generate_handler![
             greet, 
             process_audio_frame,
@@ -1885,7 +1907,7 @@ pub fn run() {
             handle_backend_control,
             audio_playback_started,
             audio_playback_ended,
-            get_vad_state
+            get_vad_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

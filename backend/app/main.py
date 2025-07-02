@@ -21,14 +21,16 @@ import app.utils.api_checker
 
 from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.protocols.stt import create_websocket_handler, create_socket_handler
+from app.protocols.screenshot_ws import screenshot_ws_manager
 from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
+from app.api.v1.screenshot import router as screenshot_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
 # 全局服务实例
 import app.global_vars as global_vars
@@ -48,6 +50,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# 添加WebSocket路由
+@app.websocket("/screenshot-ws")
+async def websocket_screenshot_endpoint(websocket: WebSocket):
+    await screenshot_ws_manager.connect(websocket)
+    try:
+        while True:
+            # 接收JSON消息
+            data = await websocket.receive_json()
+            await screenshot_ws_manager.handle_message(websocket, data)
+    except WebSocketDisconnect:
+        screenshot_ws_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket错误: {str(e)}")
+        screenshot_ws_manager.disconnect(websocket)
 
 
 @app.on_event("startup")
@@ -112,6 +129,9 @@ app.include_router(audio_router, prefix="/api/v1")
 
 # 注册控制路由
 app.include_router(control_router, prefix="/api/v1/control")
+
+# 注册截图路由
+app.include_router(screenshot_router, prefix="/api/v1")
 
 
 def main():
