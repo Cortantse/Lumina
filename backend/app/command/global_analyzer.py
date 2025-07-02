@@ -54,7 +54,7 @@ class GlobalCommandAnalyzer:
                 "emotion": emotion,
             }
             
-            logger.info(f"全局分析结果: {result}")
+            # logger.info(f"全局分析结果: {result}")
             return result
             
         except Exception as e:

@@ -36,32 +36,21 @@ class AliCloudConfig:
         Raises:
             ValueError: 当无法获取有效的Token时抛出
         """
-        # print("【调试】开始初始化阿里云配置")
         # 如果没有提供token，则尝试从环境变量获取
         if not self.token:
             self.access_key_id = self.access_key_id or os.getenv('ALIYUN_AK_ID', '')
             self.access_key_secret = self.access_key_secret or os.getenv('ALIYUN_AK_SECRET', '')
-            # print(f"【调试】阿里云AccessKeyId: "
-            #      f"{self.access_key_id[:4]}***{self.access_key_id[-4:] if len(self.access_key_id) > 8 else ''}")
-            # print(f"【调试】阿里云AccessKeySecret长度: {len(self.access_key_secret)}位")
-            
+
             if self.access_key_id and self.access_key_secret:
                 # 使用AccessKey创建Token
-                # print("【调试】使用AccessKey创建Token")
                 self.token = self.create_token()
             else:
                 # 如果没有提供access_key，则尝试从环境变量获取token
                 self.token = os.getenv('ALIYUN_TOKEN', '')
-                # print(f"【调试】从环境变量获取Token: {'已获取' if self.token else '未设置'}")
                 
         if not self.token:
             raise ValueError("未提供阿里云Token，请设置access_key或直接提供token")
         
-        # print(f"【调试】阿里云Token: "
-        #      f"{self.token[:4]}***{self.token[-4:] if len(self.token) > 8 else ''}")
-        # print(f"【调试】阿里云服务地址: {self.url}")
-        # print(f"【调试】阿里云区域: {self.region}")
-        # print("【调试】阿里云配置初始化完成")
     
     def create_token(self) -> str:
         """创建阿里云访问令牌
@@ -75,7 +64,6 @@ class AliCloudConfig:
             ValueError: 创建Token失败时抛出
             Exception: API调用异常时抛出
         """
-        # print("【调试】开始创建阿里云Token")
         # 创建AcsClient实例
         client = AcsClient(
             self.access_key_id,
@@ -150,6 +138,14 @@ class AliCloudSTTAdapter(STTClient):
         self.max_reconnect_attempts = 3  # 最大重连尝试次数
         self.last_activity_time = 0  # 上次活动时间
         self.reconnect_lock = asyncio.Lock()  # 重连锁，防止并发重连
+
+        # ----- 主動刷新（提前重連）配置 -----
+        self.auto_refresh_threshold = getattr(config, "stt_auto_refresh_threshold", 15)  # 秒
+        self.idle_check_interval = 1.0  # 秒
+        self.monitor_task: Optional[asyncio.Task] = None
+        self._refreshing = False  # 標記正在進行主動刷新
+        self.has_received_audio = False  # 首次收到音頻後才允許刷新
+
         
         # print("【调试】阿里云语音识别适配器初始化完成")
         
@@ -161,7 +157,7 @@ class AliCloudSTTAdapter(STTClient):
         Returns:
             bool: 启动成功返回True，失败返回False
         """
-        # print("【调试】开始启动语音识别会话")
+        self.has_received_audio = False  # --- PATCH: 重置首包標記
         self.future = self.loop.create_future()  # 创建Future对象用于异步通知
         self._result_ready.clear()  # 清除结果就绪状态
         self.current_text = ""  # 清空当前识别文本
@@ -204,7 +200,7 @@ class AliCloudSTTAdapter(STTClient):
                     enable_punctuation_prediction=True,  # 启用标点符号预测
                     enable_inverse_text_normalization=True,  # 启用中文数字转阿拉伯数字
                     ex={
-                        "disfluency": True,
+                        # "disfluency": True,
                         # "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
                         # 语音断句检测阈值，静音时长超过该阈值会被认为断句
                         # 范围：200-6000ms，默认800ms
@@ -217,7 +213,7 @@ class AliCloudSTTAdapter(STTClient):
                         
                         # 允许的最大结束静音，取值范围：200-6000ms，默认800ms
                         # 控制句子结束时的静音检测敏感度
-                        "max_end_silence": config.max_end_silence
+                        # "max_end_silence": config.max_end_silence
                     }
                 )
                 # print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
@@ -236,11 +232,13 @@ class AliCloudSTTAdapter(STTClient):
         thread.start()
         
         try:
-            # 等待识别器启动完成或异常，最多等待10秒
-            print("【调试】等待识别会话启动完成，最多10秒")
             await asyncio.wait_for(self.future, timeout=10)
-            print("【调试】语音识别会话启动成功")
-            return True  # 启动成功
+            print("【調試】語音識別會話啟動成功")
+
+            if self.monitor_task and not self.monitor_task.done():
+                self.monitor_task.cancel()
+            self.monitor_task = self.loop.create_task(self._idle_monitor())
+            return True
         except (asyncio.TimeoutError, Exception) as e:
             # 启动超时或异常
             print(f"【错误】启动语音识别会话失败: {e}")
@@ -276,6 +274,7 @@ class AliCloudSTTAdapter(STTClient):
             return STTResponse(text="", is_final=False)
         
         # 更新活动时间
+        self.has_received_audio = True
         self.last_activity_time = time.time()
         
         try:
@@ -363,6 +362,10 @@ class AliCloudSTTAdapter(STTClient):
                     print(f"【错误】关闭识别器时出错: {e}")
                 self.transcriber = None  # 清除识别器引用
                 # print("【调试】识别器引用已清除")
+            # 監聽任務清理（防止殘餘）
+            if self.monitor_task and not self.monitor_task.done():
+                self.monitor_task.cancel()
+
 
     def _on_start(self, message: str, *args: Any) -> None:
         """识别开始回调函数
@@ -533,6 +536,11 @@ class AliCloudSTTAdapter(STTClient):
         # 通知等待结果的协程继续执行
         # print("【调试】触发result_ready事件")
         self.loop.call_soon_threadsafe(self._result_ready.set)
+        # 監聽任務清理（防止殘餘）
+        if self.monitor_task and not self.monitor_task.done():
+            self.monitor_task.cancel()
+        self.loop.call_soon_threadsafe(self._result_ready.set)
+
 
     async def get_complete_sentences(self) -> list[str]:
         """获取缓冲区中的完整句子列表
@@ -623,3 +631,59 @@ class AliCloudSTTAdapter(STTClient):
             finally:
                 self.reconnecting = False
                 print(f"【调试】重连过程结束，状态: {'成功' if self.transcriber else '失败'}") 
+
+
+    async def _idle_monitor(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self.idle_check_interval)
+                if not self.transcriber:            # 連線已關閉
+                    break
+                if not self.has_received_audio:     # 尚未開始說話 → 不刷新
+                    continue
+
+                silent = time.time() - self.last_activity_time
+                if (
+                    silent >= self.auto_refresh_threshold
+                    and not self._refreshing
+                    and not self.reconnecting
+                ):
+                    print(f"【調試】靜默 {silent:.1f}s，啟動主動刷新")
+                    await self._proactive_refresh()
+        except asyncio.CancelledError:
+            pass
+
+
+    async def _proactive_refresh(self) -> None:
+        """靜默期主動刷新：新起一條連線以避免真正的超時斷開"""
+        self._refreshing = True
+        saved_text = self.current_text
+
+        if self.monitor_task and not self.monitor_task.done():
+            self.monitor_task.cancel()
+
+        with self.sentences_lock:
+            saved_sentences = self.complete_sentences.copy()
+        try:
+            # 關閉現有 transcriber
+            if self.transcriber:
+                try:
+                    self.transcriber.shutdown()
+                except Exception as e:
+                    print(f"【警告】刷新時關閉舊連線失敗: {e}")
+                finally:
+                    self.transcriber = None
+
+            # 快速重建新 session（不累計重連次數）
+            self.future = self.loop.create_future()
+            self._result_ready.clear()
+            result = await self.start_session()
+            if result:
+                print("【調試】主動刷新成功，已替換為新連線")
+                self.current_text = saved_text
+                with self.sentences_lock:
+                    self.complete_sentences = saved_sentences
+            else:
+                print("【錯誤】主動刷新失敗，保留舊狀態")
+        finally:
+            self._refreshing = False

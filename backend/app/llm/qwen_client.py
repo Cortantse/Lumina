@@ -52,7 +52,7 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
     # 定义句子结束的标点符号
     sentence_end_marks = ['。', '！', '？', '…', '!', '?', '.']
     
-    print(f"【调试】[QwenClient] 开始流式请求")
+    # print(f"【调试】[QwenClient] 开始流式请求")
     
     try:
         # 使用流式请求处理每个响应块
@@ -62,7 +62,7 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
             current_sentence += chunk
             
             # 打印每个流式块用于调试
-            print(f"【调试】[QwenClient] 流式块: {chunk}")
+            # print(f"【调试】[QwenClient] 流式块: {chunk}")
             
             # 检查是否有任何句子结束符
             has_end_mark = False

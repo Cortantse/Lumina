@@ -304,9 +304,18 @@ class PipelineService:
         try:
             from app.llm.qwen_client import simple_send_request_to_llm
             
+            if not text or not text.strip():
+                print(f"【警告】[Pipeline] 收到空文本，跳过LLM处理")
+                return
+                
             # 发送消息到LLM并获取响应生成器
             llm_response_generator = simple_send_request_to_llm(text)
             
+            # 确保生成器不为None
+            if not llm_response_generator:
+                print(f"【警告】[Pipeline] LLM响应生成器为None，可能是调用失败")
+                return
+                
             # 处理每个生成的完整句子
             async for sentence in llm_response_generator:
                 if not sentence:
@@ -317,6 +326,8 @@ class PipelineService:
                 # 将句子放入队列，供TTS处理器处理
                 await self.sentence_queue.put(sentence)
                 
+        except IndexError as e:
+            print(f"【错误】处理LLM响应时出错(索引错误): {e}")
         except Exception as e:
             print(f"【错误】处理LLM响应时出错: {e}")
     

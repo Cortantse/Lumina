@@ -232,6 +232,11 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
     # 浩斌应该对未处理文本的 **当前轮**的 信息进行处理，并添加到 **当前轮** 的上下文，即 to_be_processed_turns[-1]
     # 但是我这里提供了所有未处理的转录文本和所有历史上下文，浩斌可以作为相关上下文，也可以不使用
 
+    # 检查缓冲区是否为空
+    if not to_be_processed_turns.all_transcripts_in_current_turn:
+        print("【警告】[指令识别] 缓冲区为空，无法进行指令识别")
+        return
+        
     # 获取最后一轮未被处理的信息
     to_be_processed_turn = to_be_processed_turns.all_transcripts_in_current_turn[-1]
     # print(f"【调试】进行指令识别，当前转录文本: {to_be_processed_turn.transcript}")
