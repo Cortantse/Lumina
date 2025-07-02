@@ -165,6 +165,57 @@ class CommandDetector:
             logger.error(f"Error in tool-based command detection: {str(e)}")
             return None
     
+    async def detect_tool_call(self, text: str) -> Optional[CommandResult]:
+        """
+        使用工具调用进行详细的命令检测
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            命令结果对象或None
+        """
+        try:
+            # 否则，将text视为文本，使用意图检测器检测工具调用
+            result = await self.intent_detector.detect_tool_call_only(text, self.command_tools)
+            print(f"【调试】[CommandDetector] 检测到工具调用: {result}")
+            
+            # 检查结果格式，处理直接返回工具调用对象的情况
+            if result and isinstance(result, dict) and "name" in result and "arguments" in result:
+                # 直接处理工具调用对象
+                command_result = self._create_command_result_from_tool(result)
+                if command_result:
+                    return command_result
+            # 检查返回结果中是否包含工具调用(兼容旧格式)
+            elif result and result.get("tool_call"):
+                tool_calls = result["tool_call"]
+                
+                # 如果只有一个工具调用
+                if isinstance(tool_calls, list) and len(tool_calls) == 1:
+                    tool = tool_calls[0]
+                    command_result = self._create_command_result_from_tool(tool)
+                    if command_result:
+                        return command_result
+                
+                # 如果有多个工具调用，创建多个CommandResult并合并
+                elif isinstance(tool_calls, list) and len(tool_calls) > 1:
+                    print(f"【调试】检测到多个工具调用: {len(tool_calls)}个")
+                    
+                    command_results = []
+                    for tool in tool_calls:
+                        command_result = self._create_command_result_from_tool(tool)
+                        if command_result:
+                            command_results.append(command_result)
+                    
+                    if command_results:
+                        # 合并多个CommandResult
+                        return self._merge_command_results(command_results)
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error in tool-based command detection: {str(e)}")
+            return None
+    
     def _create_command_result_from_tool(self, tool: Dict) -> Optional[CommandResult]:
         """
         从工具调用创建命令结果
@@ -176,7 +227,10 @@ class CommandDetector:
             命令结果对象或None
         """
         try:
+            # 获取工具名称
             tool_name = tool.get("name", "")
+            
+            # 获取参数，支持两种可能的格式
             arguments = tool.get("arguments", {})
             
             # 根据工具名称确定命令类型
@@ -189,10 +243,11 @@ class CommandDetector:
                 command_type = CommandType.PREFERENCE
             
             if command_type:
+                # 直接从arguments获取action和params
                 action = arguments.get("action", "")
                 params = arguments.get("params", {})
                 
-                # 创建命令结果并返回，参数验证和处理逻辑应该移动到executor中
+                # 创建命令结果并返回
                 return CommandResult(
                     command_type=command_type,
                     action=action,

@@ -221,12 +221,12 @@ class IntentDetector:
             response, total_tokens, completion_tokens = await send_request_async(messages, self.model)
             # self._previous_messages.append({"role": "assistant", "content": response})
             
-            #print(f"【调试】[IntentDetector] 收到工具调用响应: {response}")
+            print(f"【调试】[IntentDetector] 收到工具调用响应: {response}")
             # #print(f"【调试】[IntentDetector] 总tokens: {total_tokens}, 生成tokens: {completion_tokens}")
             
             result = self.parse_tool_call(response)
             elapsed_time = time.time() - start_time
-            #print(f"【调试】[IntentDetector] 工具调用检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
+            print(f"【调试】[IntentDetector] 工具调用检测完成，耗时: {elapsed_time:.2f}秒, 结果: {result}")
             return result
         except Exception as e:
             #print(f"【错误】[IntentDetector] 函数调用检测出错: {e}")
