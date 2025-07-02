@@ -29,12 +29,10 @@ class ScreenshotWebSocketManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print(f"新的WebSocket连接已接受，当前连接数: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            print(f"WebSocket连接已关闭，当前连接数: {len(self.active_connections)}")
     
     async def broadcast(self, message: dict):
         """向所有连接的客户端广播消息"""
@@ -171,7 +169,6 @@ class ScreenshotWebSocketManager:
         status = data.get("status")
         
         print(f"收到截图完成通知: requestId={request_id}, status={status}")
-        # 这里可以添加更多处理逻辑，例如通知其他系统或更新状态
 
 # 创建全局WebSocket管理器实例
 screenshot_ws_manager = ScreenshotWebSocketManager() 

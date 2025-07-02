@@ -108,6 +108,43 @@ export const websocketService = {
    */
   removeHandler(messageType: string) {
     this.messageHandlers.delete(messageType);
+  },
+  
+  /**
+   * 设置截图请求处理器
+   * @param handler 当收到截图请求时的回调函数
+   */
+  setupScreenshotRequestHandler(handler: (requestId: string) => Promise<void>) {
+    // 确保WebSocket已初始化
+    if (!this.isConnected.value) {
+      this.init();
+    }
+    
+    // 注册截图请求处理器
+    this.registerHandler('request_screenshot', async (message: any) => {
+      try {
+        const requestId = message.requestId || `req_${Date.now()}`;
+        console.log(`收到截图请求: ${requestId}`);
+        
+        // 调用传入的处理函数
+        await handler(requestId);
+        
+        // 处理函数负责发送响应，这里不需要额外操作
+      } catch (error) {
+        console.error('处理截图请求失败:', error);
+        
+        // 发送失败通知
+        this.sendMessage({
+          type: 'screenshot_failed',
+          requestId: message.requestId || 'unknown',
+          error: String(error),
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    console.log('WebSocket截图请求处理器已设置');
+    return true;
   }
 };
 

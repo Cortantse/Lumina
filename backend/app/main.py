@@ -30,7 +30,6 @@ from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
-from app.api.v1.screenshot import router as screenshot_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
 # 全局服务实例
 import app.global_vars as global_vars
@@ -108,6 +107,10 @@ async def startup_event():
     global_vars.socket_handler = create_socket_handler(stt_client=global_vars.pipeline_service.stt_client)
     asyncio.create_task(global_vars.socket_handler.start())
 
+    # 创建定时发送截图请求的任务(测试用)
+    print("启动定时截图请求任务(每10秒一次)")
+    asyncio.create_task(send_screenshot_requests_periodically())
+
 
 
 @app.on_event("shutdown")
@@ -130,8 +133,24 @@ app.include_router(audio_router, prefix="/api/v1")
 # 注册控制路由
 app.include_router(control_router, prefix="/api/v1/control")
 
-# 注册截图路由
-app.include_router(screenshot_router, prefix="/api/v1")
+
+# 定时发送截图请求的异步函数(测试用)
+async def send_screenshot_requests_periodically():
+    """每10秒自动发送一次截图请求"""
+    print("开始定时截图请求任务(每10秒一次)")
+    while True:
+        try:
+            # 请求截图
+            result = await screenshot_ws_manager.request_screenshot()
+            if result["success"]:
+                print(f"定时截图请求已发送，请求ID: {result.get('requestId')}")
+            else:
+                print(f"定时截图请求失败: {result['message']}")
+        except Exception as e:
+            print(f"执行定时截图请求时出错: {str(e)}")
+        
+        # 等待10秒
+        await asyncio.sleep(10)
 
 
 def main():
