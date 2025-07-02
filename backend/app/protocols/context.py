@@ -166,7 +166,8 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
     if command_result and command_result.is_command():
         
         # 使用工具调用获取详细命令
-        command_tools_result = await command_detector.detect_command_with_tools(transcript)
+        command_tools_result = await command_detector.detect_tool_call(transcript)
+        print(f"【调试】[Context] 检测到命令: {command_tools_result}")
         if command_tools_result:
             # 处理记忆操作类命令
             if command_tools_result.type.value == "MEMORY_MULTI":
