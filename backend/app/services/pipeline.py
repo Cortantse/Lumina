@@ -15,6 +15,7 @@ from app.tts.send_tts import send_tts_audio_stream
 # 初始化并注册命令检测器
 from app.memory.store import get_memory_manager
 from app.utils.exception import print_error
+from app.verify.main_generation import retrieve_emotion_and_cleaned_sentence_from_text
 
 
 class PipelineService:
@@ -238,6 +239,9 @@ class PipelineService:
         # 确保TTS客户端已初始化
         if not self.tts_client:
             await self.init_tts_client()
+
+        current_emotion = TTSApiEmotion.NEUTRAL
+        time_stamp = time.time()
             
         while self.running:
             try:
@@ -246,16 +250,23 @@ class PipelineService:
                 
                 if sentence:
                     # print(f"【调试】[TTS处理器] 处理句子: {sentence}")
-                    
+                    emotion, cleaned_sentence = retrieve_emotion_and_cleaned_sentence_from_text(sentence)
+                    if emotion != current_emotion and emotion is not None and emotion != TTSApiEmotion.NEUTRAL:
+                        print(f"【调试】[TTS处理器] 从{current_emotion}切换到{emotion}")
+                        current_emotion = emotion
+                        time_stamp = time.time()
+
                     # 获取音频流并发送到前端
-                    audio_stream = self.tts_client.send_tts_request(None, sentence)
+                    audio_stream = self.tts_client.send_tts_request(current_emotion, cleaned_sentence)
                     await send_tts_audio_stream(audio_stream)
                     
                     # 标记任务完成
                     self.sentence_queue.task_done()
 
-                # 休息
-                await asyncio.sleep(self.check_interval)
+                    # 检查是否超过8秒没有情绪变化
+                    if time.time() - time_stamp > 8 and current_emotion:
+                        current_emotion = None
+                        time_stamp = time.time()
                 
             except asyncio.CancelledError:
                 print("【调试】TTS处理任务被取消")
