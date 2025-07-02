@@ -88,6 +88,16 @@ pre_reply：“你好呀,”
 [HAPPY]
 我有什么能够帮你。
 
+=== 七、丰富情感 ===
+请你尽量丰富你的情感，使用不同的情感标注，并尽量避免重复使用相同的情感标注，你可以参考历史记录。
+
+
+
+
+
+
+
+
    """
    )
 
@@ -127,7 +137,7 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
     
     try:
         # 使用流式请求处理每个响应块
-        async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-max"):
+        async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-plus-latest"):
             full_response += chunk
             current_sentence += chunk
             
