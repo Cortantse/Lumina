@@ -4,7 +4,6 @@ from typing import Optional, Any, List, Callable, Dict, AsyncGenerator
 import asyncio
 import time
 import wave
-import torch
 from fastapi import WebSocket
 import queue
 from collections import deque
@@ -15,6 +14,7 @@ from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion, get_tts_client, T
 from app.tts.send_tts import send_tts_audio_stream
 # 初始化并注册命令检测器
 from app.memory.store import get_memory_manager
+from app.utils.exception import print_error
 
 
 class PipelineService:
@@ -47,7 +47,7 @@ class PipelineService:
         self.tts_client = None
         self.tts_api_key = tts_api_key
         # self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
-        
+
         # TTS播放控制
         self.tts_playing = False
         self.tts_monitor_task = None
@@ -253,6 +253,9 @@ class PipelineService:
                     
                     # 标记任务完成
                     self.sentence_queue.task_done()
+
+                # 休息
+                await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
                 print("【调试】TTS处理任务被取消")
@@ -329,7 +332,7 @@ class PipelineService:
         except IndexError as e:
             print(f"【错误】处理LLM响应时出错(索引错误): {e}")
         except Exception as e:
-            print(f"【错误】处理LLM响应时出错: {e}")
+            print_error(self._process_llm_response, e)
     
     async def _run_callback(self, callback: Callable, text: str, is_final: bool) -> None:
         """运行回调函数
@@ -348,3 +351,9 @@ class PipelineService:
             # print("【调试】回调函数执行完成")
         except Exception as e:
             print(f"【错误】运行回调函数失败: {e}")
+
+    async def put_pre_reply_response(self, text: str) -> None:
+        """
+        将预回复内容快速加入到 queue中
+        """
+        await self.sentence_queue.put(text)
