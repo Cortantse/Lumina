@@ -25,10 +25,8 @@ async function greet() {
       <AudioPlayback />
     </div>
 
-    <div class="feature-section">
-      <h2>屏幕截图工具</h2>
-      <ScreenshotManager />
-    </div>
+
+    <ScreenshotManager />
 
     <!-- <div class="feature-section">
       <h2>实时 VAD (语音活动检测)</h2>
