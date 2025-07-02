@@ -54,7 +54,7 @@ class GlobalCommandAnalyzer:
                 "emotion": emotion,
             }
             
-            logger.info(f"全局分析结果: {result}")
+            # logger.info(f"全局分析结果: {result}")
             return result
             
         except Exception as e:
@@ -89,7 +89,7 @@ class GlobalCommandAnalyzer:
                 {"role": "user", "content": prompt}
             ]
             
-            response, _, _ = await send_request_async(messages, "qwen-max-2025-01-25")
+            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
             
             # 清理和验证响应
             emotion = response.strip()
@@ -102,4 +102,4 @@ class GlobalCommandAnalyzer:
         except Exception as e:
             logger.error(f"情绪分析错误: {str(e)}")
             return "中性"
-    
+

@@ -8,6 +8,7 @@ from typing import Dict, Optional, List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 from app.api.v1.audio import router
+from app.llm.qwen_client import _global_to_be_processed_turns
 
 # 创建路由器
 router = APIRouter()
@@ -115,17 +116,14 @@ class ControlMessageHandler:
             silence_bytes = await loop.sock_recv(client, 8)
             if len(silence_bytes) == 8:
                 silence_duration = struct.unpack("<Q", silence_bytes)[0]
-                # print(f"【重要】收到静音事件 (客户端 {client_id}): {silence_duration}ms")
                 
-                # 这里可以添加更多的静音事件处理逻辑
-                # 比如记录静音时长、触发特定动作等
+                # 记录静音时长
+                _global_to_be_processed_turns.silence_duration = silence_duration
                 
-                # 可以通过控制连接管理器通知其他服务
-                # await control_manager.broadcast_control_message({
-                #     "type": "silence_event",
-                #     "client_id": client_id,
-                #     "silence_ms": silence_duration
-                # })
+                # 在这里处理 短、中、长超时的情况，相当于静音事件驱动
+                ...
+
+                
             else:
                 print(f"【警告】静音事件数据不完整，客户端 {client_id}")
         except Exception as e:

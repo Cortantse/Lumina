@@ -58,7 +58,7 @@ class PreferenceHandler:
             ]
             
             # 发送请求到模型
-            response, _, _ = await send_request_async(messages, "qwen-max-2025-01-25")
+            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
             
             # 检查结果
             if not response or len(response) < 10:
