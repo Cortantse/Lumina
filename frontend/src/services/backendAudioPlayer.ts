@@ -173,7 +173,7 @@ class BackendAudioPlayerService {
       const features = this.calculateAudioFeatures(this.dataArray);
       
       if (features.volume > 0.01) {
-        console.log(`[诊断] 音频特征: 音量=${features.volume.toFixed(3)}, 是否静音=${features.isSilent}`);
+        // console.log(`[诊断] 音频特征: 音量=${features.volume.toFixed(3)}, 是否静音=${features.isSilent}`);
       }
 
       window.dispatchEvent(new CustomEvent('backend-audio-features', { detail: features }));

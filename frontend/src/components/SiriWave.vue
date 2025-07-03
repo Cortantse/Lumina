@@ -523,8 +523,15 @@ onLoop(({ elapsed }: { elapsed: number }) => {
 </script>
 
 <template>
-  <div class="siri-wave-wrapper">
-    <TresCanvas ref="canvasRef" :alpha="true" :antialias="true">
+  <div ref="canvasRef">
+    <TresCanvas 
+      class="siri-canvas"
+      window-size 
+      alpha
+      shadows
+      resize
+      shadows-type="pcfsoft"
+    >
       <TresPerspectiveCamera :position="[0,0,4]" :fov="50" />
       <!-- 
         可调参数：环境光强度
@@ -554,7 +561,7 @@ onLoop(({ elapsed }: { elapsed: number }) => {
         <TresIcosahedronGeometry :args="[0.9,256]" />
         <TresShaderMaterial
           v-bind="shader"
-          :transparent="false"
+          :transparent="true"
           :side="1"
           :depth-test="true"
           :depth-write="true"
@@ -564,10 +571,24 @@ onLoop(({ elapsed }: { elapsed: number }) => {
   </div>
 </template>
 
-<style scoped>
-.siri-wave-wrapper { 
-  width: 100%; 
-  height: 100%; 
-  position: relative; 
+<style>
+/* 设置Siri波形相关的全局样式 */
+.siri-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  position: fixed !important;
+  left: 0;
+  top: 0;
+  pointer-events: none; /* 允许通过点击 */
+  z-index: -1; /* 置于所有内容后面 */
+  background-color: transparent;
+}
+
+/* 确保canvas元素填满屏幕 */
+.siri-canvas canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  background-color: transparent;
 }
 </style> 

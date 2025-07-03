@@ -12,9 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "frontend",
-        "width": 800,
-        "height": 600
+        "decorations": false,
+        "shadow": false,
+        "resizable": false,
+        "title": "Lumina",
+        "transparent": true,
+        "width": 225,
+        "height": 250
       }
     ],
     "security": {

@@ -21,10 +21,11 @@ import app.utils.api_checker
 
 from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.protocols.stt import create_websocket_handler, create_socket_handler
+from app.protocols.screenshot_ws import screenshot_ws_manager
 from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
@@ -48,6 +49,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# 添加WebSocket路由
+@app.websocket("/screenshot-ws")
+async def websocket_screenshot_endpoint(websocket: WebSocket):
+    await screenshot_ws_manager.connect(websocket)
+    try:
+        while True:
+            # 接收JSON消息
+            data = await websocket.receive_json()
+            await screenshot_ws_manager.handle_message(websocket, data)
+    except WebSocketDisconnect:
+        screenshot_ws_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket错误: {str(e)}")
+        screenshot_ws_manager.disconnect(websocket)
 
 
 @app.on_event("startup")
@@ -91,6 +107,10 @@ async def startup_event():
     global_vars.socket_handler = create_socket_handler(stt_client=global_vars.pipeline_service.stt_client)
     asyncio.create_task(global_vars.socket_handler.start())
 
+    # 创建定时发送截图请求的任务(测试用)
+    print("启动定时截图请求任务(每10秒一次)")
+    asyncio.create_task(send_screenshot_requests_periodically())
+
 
 
 @app.on_event("shutdown")
@@ -112,6 +132,25 @@ app.include_router(audio_router, prefix="/api/v1")
 
 # 注册控制路由
 app.include_router(control_router, prefix="/api/v1/control")
+
+
+# 定时发送截图请求的异步函数(测试用)
+async def send_screenshot_requests_periodically():
+    """每10秒自动发送一次截图请求"""
+    print("开始定时截图请求任务(每10秒一次)")
+    while True:
+        try:
+            # 请求截图
+            result = await screenshot_ws_manager.request_screenshot()
+            if result["success"]:
+                print(f"定时截图请求已发送，请求ID: {result.get('requestId')}")
+            else:
+                print(f"定时截图请求失败: {result['message']}")
+        except Exception as e:
+            print(f"执行定时截图请求时出错: {str(e)}")
+        
+        # 等待10秒
+        await asyncio.sleep(10)
 
 
 def main():
