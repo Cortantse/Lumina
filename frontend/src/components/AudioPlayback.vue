@@ -114,6 +114,7 @@ import { tauriApi } from '../services/tauriApi';
 import { AudioCaptureInterface, MicrophoneDevice, VadEventType } from '../types/audio-processor';
 import SiriWave from './SiriWave.vue';
 import audioAnalyzer, { AudioFeatures } from '../services/audioAnalyzer';
+import backendAudioPlayer from '../services/backendAudioPlayer';
 
 // --- 组件核心状态 ---
 const COMPONENT_NAME = 'AudioPlayback';
@@ -257,22 +258,62 @@ function handleSilenceEvent(event: CustomEvent) {
 }
 
 // STT 结果
+let lastRecognizedText = ''; // 添加变量记录上一次的识别文本
+
+// STT 结果
 function handleSttResult(event: CustomEvent) {
   const result = event.detail;
-  // console.log('[调试-STT] 收到语音识别结果事件:', result);
   
   if (result && result.text) {
-    // console.log(`[调试-STT] 文本内容: "${result.text}", 是否最终: ${result.isFinal}`);
+    const previousText = recognizedText.value;
     recognizedText.value = result.text;
     isTextFinal.value = result.isFinal;
     
+    // 检测中间转录文本(非最终结果)，如果有变化则触发打断
+    if (!result.isFinal) {
+      // 计算当前文本与上一次结果的增量
+      const increment = result.text.length > lastRecognizedText.length 
+        ? result.text.substring(lastRecognizedText.length) 
+        : '';
+      
+      // 如果增量至少是一个字符，则打断当前的音频播放
+      if (increment.length >= 1) {
+        console.log(`[CONFIG] 检测到中间转录文本增量: "${increment}"`);
+        
+        // 停止并清空所有TTS音频
+        if (backendAudioPlayer) {
+          console.log('[AudioPlayback] 检测到中间转录文本变化，中断所有TTS音频');
+          backendAudioPlayer.stopPlayback();
+          
+          // 发送打断事件到后端
+          sendInterruptEventToBackend();
+        }
+      }
+    }
+    
+    // 更新上一次识别的文本
+    lastRecognizedText = result.text;
+    
     if (result.isFinal && result.text.trim()) {
-      //console.log('[调试-STT] 添加到历史记录:', result.text);
       textHistory.value.unshift(result.text);
       if (textHistory.value.length > 10) textHistory.value.pop();
     }
   } else {
     console.log('[调试-STT] 收到的结果不包含文本:', result);
+  }
+}
+
+// 发送打断事件到后端
+async function sendInterruptEventToBackend() {
+  try {
+    // 通过Tauri的状态机API发送打断事件(INTERRUPT类型0x05)
+    await tauriApi.invoke('handle_backend_control', {
+      action: 'interrupt',
+      data: 'user_interrupt'
+    });
+    console.log('[AudioPlayback] 已发送打断事件到后端');
+  } catch (error) {
+    console.error('[AudioPlayback] 发送打断事件失败:', error);
   }
 }
 

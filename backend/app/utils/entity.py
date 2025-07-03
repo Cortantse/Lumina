@@ -31,7 +31,7 @@ class TemplateRequest:
     # 平台支持的模型配置 (简化模型名称，去掉版本)
     PLATFORM_MODELS = {
         "ali": {
-            "max": "qwen-max",
+            "max": "qwen-max-latest",
             "turbo": "qwen-turbo-2025-02-11",
             "plus": "qwen-plus-0305",
             "turbo-new": "qwen-turbo-latest",

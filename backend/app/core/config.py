@@ -13,15 +13,39 @@ debug_request = False # 控制是否打印请求相关的调试信息
 # 系统全局规则
 screenshot_interval = 15000 # 截图间隔时间，单位：毫秒
 short_silence_timeout = 150 # 短静默时间，单位：毫秒，发起 std
-mid_silence_timeout = 1000 # 中静默时间，单位：毫秒, 提示用户 我在听
+mid_silence_timeout = 500 # 中静默时间，单位：毫秒, 提示用户 我在听
 long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush 当前会话
 
 # stt 参数
-max_sentence_silence = 200 # 最大句子静默时间，单位：毫秒
-max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
-max_end_silence = 80 # 最大结束静默时间，单位：毫秒
+max_sentence_silence = 300 # 最大句子静默时间，单位：毫秒
+max_single_segment_time = 5000 # 最大单个句子时间，单位：毫秒
+max_end_silence = 400 # 最大结束静默时间，单位：毫秒
+reconnection_delay = 0.1 # 重连延迟时间，单位：秒
 
-recent_judge_context_count = 6 # 最近 std 判断上下文数量
+
+# pre-reply 参数
+use_round_count = 6 # 使用多少轮历史记录来生成预回复
+
+# std 参数
+recent_judge_context_count = 14 # 最近 std 判断上下文数量
+critical_threshold = 800 # 临界阈值，单位：毫秒，0.8s内用户说话则认为用户再延续发言
+
+# STD判断过于保守相关参数
+conservative_threshold_ratio_mild = 1/3  # 轻度保守的冷却窗口比例（相对于临界阈值）
+conservative_threshold_ratio_severe = 2/3  # 严重保守的冷却窗口比例（相对于临界阈值）
+consecutive_mild_conservative_count = 3  # 连续几次轻度保守判定才视为过于保守
+no_interrupt_tolerance = 2000  # 无打断容忍时间（用户在critical_threshold后多久没说话才视为无打断），单位：毫秒
+actual_interrupt_ratio_threshold = 0.3  # 实际打断时间与冷却窗口比例阈值，低于此值视为实际打断远小于冷却窗口
+
+short_std_waiting_time = 50 # 短 std 等待时间，单位：毫秒，用于判断用户是否说完话，非常确信用户说完话
+mid_std_waiting_time = 150 # 中 std 等待时间，单位：毫秒，用于判断用户是否说完话，比较确信用户说完话
+long_std_waiting_time = 350 # 中长 std 等待时间，单位：毫秒，用于判断用户是否说完话，一般确信用户说完话
+long_long_std_waiting_time = 500 # 长 std 等待时间，单位：毫秒，用于判断用户是否说完话，不太确信用户说完话
+extra_std_waiting_time = 800 # 额外 std 等待时间，单位：毫秒，用于判断用户是否说完话，非常不确定用户说完话
+
+# std 状态机相关参数
+history_states_count = 7 # 历史状态数量
+
 
 # 文本分块配置 (用于RAG中的父子文档策略)
 # 这些参数控制着长文本在存入记忆前如何被分割成小块。
@@ -39,7 +63,7 @@ MEMORY_CONFIG = {
 }
 
 VECTORIZATION_CONFIG = {
-    "default_model": "bge-base-zh",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
+    "default_model": "openai",  # 可在 "openai" 和 "bge-base-zh" 之间切换！！！！！！！！！！！！！！！！！！！！
     "models": {
         "openai": {
             "type": "openai",

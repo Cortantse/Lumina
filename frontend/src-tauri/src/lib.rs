@@ -1760,6 +1760,15 @@ async fn handle_backend_control(action: String, data: String) -> Result<String, 
             //println!("[状态机] 执行后端请求的结束session");
             VadStateMachineEvent::BackendEndSession
         },
+        "interrupt" => {
+            println!("[状态机] 执行用户打断操作");
+            // 如果在播放音频状态，先发送AudioPlaybackEnd事件
+            if *state_machine.get_current_state() == VadState::Listening {
+                state_machine.process_event(VadStateMachineEvent::AudioPlaybackEnd, &mut socket_manager_guard);
+            }
+            // 然后重置到初始状态
+            VadStateMachineEvent::BackendResetToInitial
+        },
         _ => {
             println!("[警告] 未知的后端控制动作: {}", action);
             return Err(format!("未知的控制动作: {}", action));

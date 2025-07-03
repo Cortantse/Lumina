@@ -201,7 +201,7 @@ class MiniMaxTTSClient(TTSClient):
         
         # 默认语音设置
         self.default_voice_id = DEFAULT_VOICE_ID
-        self.default_speed = 1.2  # 范围[0.5,2]
+        self.default_speed = 1.35  # 范围[0.5,2]
         self.default_volume = 1.0  # 范围(0,10]
         self.default_pitch = 0  # 范围[-12,12]
         self.default_emotion = TTSApiEmotion.NEUTRAL  # 默认情绪为中性
