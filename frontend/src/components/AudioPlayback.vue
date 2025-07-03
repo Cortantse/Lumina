@@ -1,10 +1,10 @@
 <template>
   <div class="audio-playback-container">
     <!-- 音频播放状态指示器 -->
-    <div class="audio-playback-status" :class="{ 'active': isPlayingBackendAudio }">
+    <!-- <div class="audio-playback-status" :class="{ 'active': isPlayingBackendAudio }">
       后端音频播放状态: {{ isPlayingBackendAudio ? '正在播放' : '未播放' }}
       <div class="audio-playback-indicator"></div>
-    </div>
+    </div> -->
 
     <!-- SiriWave 可视化组件和识别结果区域 -->
     <div class="main-content-row">
@@ -22,25 +22,25 @@
         <div class="stt-text" :class="{ 'final': isTextFinal }">
           {{ recognizedText || '等待语音输入...' }}
         </div>
-        <div class="debug-stt-info">
+        <!-- <div class="debug-stt-info">
           <p>语音状态: {{ isSpeaking ? '说话中' : '静音' }}</p>
           <p>最后更新: {{ new Date().toLocaleTimeString() }}</p>
-        </div>
+        </div> -->
       </div>
     </div>
 
     <!-- VAD 状态指示 -->
-    <div class="vad-status">
+    <!-- <div class="vad-status">
       <div 
         class="vad-indicator" 
         :class="{ 'active': isSpeaking }"
         :title="isSpeaking ? '检测到语音' : '静音状态'"
       ></div>
       <div class="vad-label">{{ statusText }}</div>
-    </div>
+    </div> -->
 
     <!-- 状态机状态显示 -->
-    <div class="state-machine-status">
+    <!-- <div class="state-machine-status">
       <div class="state-indicator">
         <span class="state-label">状态机状态:</span>
         <span class="state-value" :class="`state-${currentStateMachineState.toLowerCase()}`">
@@ -50,10 +50,10 @@
       <div class="silence-info" v-if="silenceDuration > 0">
         <span>静音时长: {{ silenceDuration }}ms</span>
       </div>
-    </div>
+    </div> -->
 
     <!-- SiriWave状态和音频音量显示 -->
-    <div class="audio-status-panel">
+    <!-- <div class="audio-status-panel">
       <div class="status-item">
         <span class="status-label">SiriWave状态:</span>
         <span class="status-value" :class="`siri-${siriWaveMode}`">
@@ -67,7 +67,7 @@
           <span class="volume-text">{{ (currentAudioVolume * 100).toFixed(1) }}%</span>
         </div>
       </div>
-    </div>
+    </div> -->
 
     <!-- 控制按钮 -->
     <div class="controls">
@@ -83,9 +83,9 @@
       >
         播放识别语音
       </button>
-      <button @click="simulateSttResult" class="debug-button">
+      <!-- <button @click="simulateSttResult" class="debug-button">
         模拟STT结果
-      </button>
+      </button> -->
     </div>
 
     <!-- 麦克风选择器 -->
@@ -107,7 +107,7 @@
     </div>
 
     <!-- 模拟麦克风控制 -->
-    <div class="simulated-mic-controls">
+    <!-- <div class="simulated-mic-controls">
       <div class="sim-mic-header">
         <h4>模拟麦克风</h4>
         <span class="sim-mic-status" :class="{ 'active': isSimulatedMicActive }">
@@ -156,7 +156,7 @@
           删除录制音频
         </button>
       </div>
-    </div>
+    </div> -->
 
     <!-- 历史记录 -->
     <div class="history-section" v-if="textHistory.length > 0">
@@ -198,11 +198,11 @@
     </div>
 
     <!-- 调试信息 -->
-    <div v-if="debug" class="debug-info">
+    <!-- <div v-if="debug" class="debug-info">
       <p>VAD状态: {{ isVadActive ? '运行中' : '已停止' }}</p>
       <p>正在说话: {{ isSpeaking ? '是' : '否' }}</p>
       <p>当前麦克风: {{ getCurrentMicrophoneName() }}</p>
-    </div>
+    </div> -->
   </div>
 </template>
 
