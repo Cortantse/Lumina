@@ -20,6 +20,7 @@ from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
+from app.api.v1.files import router as files_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
 
 # 加载环境变量
@@ -104,6 +105,9 @@ app.include_router(audio_router, prefix="/api/v1")
 
 # 注册控制路由
 app.include_router(control_router, prefix="/api/v1/control")
+
+# 注册文件上传路由
+app.include_router(files_router, prefix="/api/v1/files")
 
 
 def main():

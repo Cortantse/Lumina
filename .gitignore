@@ -16,3 +16,7 @@ venv/
 
 # node_modules
 node_modules/
+/backend/screenshots
+backend/app/utils/api_status_cache.json
+/backend/data
+/data

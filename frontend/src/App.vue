@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import SystemAudioRecorder from "./components/SystemAudioRecorder.vue";
+import FileUpload from "./components/FileUpload.vue";
 
 const greetMsg = ref("");
 const name = ref("");
@@ -17,11 +18,11 @@ async function greet() {
   <main class="container">
 
     <div class="feature-section">
-      <SystemAudioRecorder />
+      <AudioPlayback />
     </div>
 
     <div class="feature-section">
-      <AudioPlayback />
+      <FileUpload />
     </div>
 
     <!-- <div class="feature-section">
