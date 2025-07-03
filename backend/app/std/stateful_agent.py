@@ -1,5 +1,6 @@
 # app/std/stateful_agent.py
 import json
+import re
 from app.std.state_machine import Event, STDStateMachine, State, AnswerOnceState
 from app.core import config
 from app.models.context import DialogueTurn, ExpandedTurn, AgentResponseTurn, MultipleExpandedTurns, CompressedTurn
@@ -26,7 +27,7 @@ EVENT_TO_STATE_MAP = {
 }
 
 def create_stateful_agent_system_prompt() -> str:
-    return f"""
+    return """
 你是 STD 状态事件识别模块（STD Event Generator）。
 
 你的任务是根据当前状态（CurrentState）、历史对话和状态序列（HistoryStatesAndDialogue），判断是否应触发下列状态事件之一，并输出一个 JSON 格式的结果用于驱动状态机转移。
@@ -112,6 +113,7 @@ HistoryStatesAndDialogue: "{{history_states_and_dialogue}}"(越后面越新，�
 - 若语义明确但无关键词，请根据上下文判断用户意图是否足以触发事件。  
 - 若无明显切换意图、上下文连续、对话稳定 → 返回 `NO_EVENT`。
 - 由于实际提供给你的历史状态序列是有限的，所以大部分情况下请输出 `NO_EVENT`，其本身带有了历史状态可作为考虑。
+- 用户处于一个介绍 lumina 项目的答辩场景，请明确其**说话对象**是你还是答辩老师，除非用户明确表达出需要系统回答也就是和你对话，否则请尽量让系统进入 SilenceState。
 
 ---
 
@@ -155,6 +157,7 @@ class StatefulAgent:
         self.state_machine = STDStateMachine()
         self.history_states_dialogue: List[DialogueTurn] = [] # 可能是 user，也可能是 agent
         self.dialogue_state_history: List[str] = [] # 记录状态历史
+        self.event_history: List[str] = [] # 记录触发事件历史
         self.state_transition_feedback: List[Dict[str, str]] = [] # 记录状态转换反馈
 
     def add_dialogue_turn(self, turn: DialogueTurn) -> None:
@@ -168,16 +171,20 @@ class StatefulAgent:
         if len(self.history_states_dialogue) > config.history_states_count * 2:  # 乘2因为user和agent各算一轮
             self.history_states_dialogue = self.history_states_dialogue[-config.history_states_count * 2:]
 
-    def add_state_history(self, state: State) -> None:
+    def add_state_history(self, state: State, event_name: str = "NO_EVENT") -> None:
         """
-        添加一个状态历史
+        添加一个状态历史和对应的触发事件
         params:
             state: State 状态
+            event_name: str 触发该状态的事件名称
         """
         self.dialogue_state_history.append(str(state))
+        self.event_history.append(event_name)
+        
         # 保持历史长度限制
         if len(self.dialogue_state_history) > config.history_states_count:
             self.dialogue_state_history = self.dialogue_state_history[-config.history_states_count:]
+            self.event_history = self.event_history[-config.history_states_count:]
 
     def is_valid_state_transition(self, from_state: str, to_state: str) -> bool:
         """
@@ -216,16 +223,39 @@ class StatefulAgent:
                     "event": event.name,
                     "message": f"警告：从{current_state_str}到{target_state_str}的状态转换无效，触发事件：{event.name}"
                 }
-                print_error(self.on_event, feedback["message"])
+                import traceback
+                error_trace = traceback.format_exc()
+                print_error(self.on_event, f"{feedback['message']}\n调用堆栈: \n{error_trace}")
                 self.state_transition_feedback.append(feedback)
         
         # 执行状态转换
         new_state = self.state_machine.on_event(event)
         
-        # 记录新状态
-        self.add_state_history(new_state)
+        # 记录新状态和触发事件
+        self.add_state_history(new_state, event.name)
         
         return new_state
+
+    def _clean_emotion_tags(self, text: str) -> str:
+        """
+        清理文本中的情感标签 [EMOTION]
+        params:
+            text: str 原始文本
+        return:
+            str 清理后的文本
+        """
+        if not text:
+            return text
+        
+        # 移除所有情感标签模式 [XXX]，不限于有效情感
+        pattern = r'\[(NEUTRAL|HAPPY|SAD|ANGRY|FEARFUL|DISGUSTED|SURPRISED)\]'
+        cleaned_text = re.sub(pattern, '', text)
+        
+        # 处理可能出现的多余空行和空格
+        cleaned_text = re.sub(r'\n\s*\n', '\n', cleaned_text)
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+        
+        return cleaned_text
 
     def _construct_context_for_state_prediction(self) -> List[str]:
         """
@@ -233,15 +263,16 @@ class StatefulAgent:
         
         格式示例：
         1. 对话模式: 
-           user:{user1}, assistant:{预测事件1}, 
-           user:{agent1 + user2}, assistant:{预测事件2}, ...
-        
-        2. silence模式: 
-           user:{user1}, assistant:{预测事件1}, 
-           user:{user2}, assistant:{预测事件2}, ...
+           user:{user1}
+           [系统状态: 当前状态]
+           [事件: 预测事件1]
            
-        3. proactive模式: 
-           可能出现一个user轮次对应多个agent回复
+           assistant:{agent1}
+           
+           user:{user2}
+           [系统状态: 当前状态] 
+           [事件: 预测事件2]
+           ...
         
         注意：只有用户输入才算作一个轮次，agent回复不单独算轮次
         
@@ -254,7 +285,7 @@ class StatefulAgent:
             recent_feedback = self.state_transition_feedback[-3:]  # 最多显示3条最近的反馈
             feedback_messages = []
             for fb in recent_feedback:
-                feedback_messages.append(f"[反馈：{fb['message']}]")
+                feedback_messages.append(f"【反馈】: {fb['message']}")
             
             feedback_info = "【状态转换反馈】\n" + "\n".join(feedback_messages) + "\n\n"
         
@@ -270,7 +301,19 @@ class StatefulAgent:
         # 为每个用户输入构建上下文
         for i, user_idx in enumerate(user_indices):
             user_turn = self.history_states_dialogue[user_idx]
-            user_text = f"用户说: {user_turn.transcript}"
+            user_text = f"用户说: {user_turn.transcript}\n"
+            
+            # 添加相应的状态信息，独立成行
+            if i < len(self.dialogue_state_history):
+                state = self.dialogue_state_history[i]
+                
+                # 使用实际记录的事件，而非推断
+                event = "NO_EVENT"
+                if i < len(self.event_history):
+                    event = self.event_history[i]
+                
+                user_text += f"【系统状态】: {state}\n"
+                user_text += f"【触发事件】: {event}\n -----\n"
             
             # 收集上一轮到这一轮之间所有的系统回复
             prev_responses = []
@@ -280,17 +323,15 @@ class StatefulAgent:
                 for j in range(prev_user_idx + 1, user_idx):
                     turn = self.history_states_dialogue[j]
                     if isinstance(turn, AgentResponseTurn):
-                        response_text = f"助手说: {turn.response}"
+                        # 清理情感标签
+                        cleaned_response = self._clean_emotion_tags(turn.response)
+                        response_text = f"助手说: {cleaned_response}"
                         prev_responses.append(response_text)
             
-            # 如果有前一轮的系统回复，添加到当前用户输入之前
+            # 如果有前一轮的系统回复，添加到当前用户输入之前，并确保格式清晰
             if prev_responses:
-                user_text = "\n".join(prev_responses) + "\n" + user_text
-            
-            # 添加相应的状态信息
-            if i < len(self.dialogue_state_history):
-                state_info = f"[状态: {self.dialogue_state_history[i]}]"
-                user_text = f"{user_text} {state_info}"
+                # 在用户文本前添加空行，保持结构清晰
+                user_text = "\n".join(prev_responses) + "\n\n" + user_text
             
             context_items.append(user_text)
         
@@ -300,7 +341,9 @@ class StatefulAgent:
             for j in range(user_indices[-1] + 1, len(self.history_states_dialogue)):
                 turn = self.history_states_dialogue[j]
                 if isinstance(turn, AgentResponseTurn):
-                    response_text = f"助手说: {turn.response}"
+                    # 清理情感标签
+                    cleaned_response = self._clean_emotion_tags(turn.response)
+                    response_text = f"助手说: {cleaned_response}"
                     last_responses.append(response_text)
             
             if last_responses:
@@ -347,26 +390,49 @@ class StatefulAgent:
         })
 
         try:
-            response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
+            response, _, _ = await send_request_async(messages, "qwen-max-latest")
         except Exception as e:
-            print_error(self.update_state, f"请求LLM失败: {e}")
+            import traceback
+            error_trace = traceback.format_exc()
+            print_error(self.update_state, f"请求LLM失败: {e}\n调用堆栈: \n{error_trace}")
             return self.state_machine.state
 
         # 解析
         try:
             # 确保response不为None
             if response is None:
-                print_error(self.update_state, "LLM响应为None")
+                import traceback
+                error_trace = traceback.format_exc()
+                print_error(self.update_state, f"LLM响应为None\n调用堆栈: \n{error_trace}")
                 return self.state_machine.state
                 
-            # 去除头尾的 ``` 和 ```
+            # 更健壮地处理各种可能的 Markdown 格式和代码块
             response_text = response.strip()
-            if response_text.startswith("```") and response_text.endswith("```"):
-                response_text = response_text[3:-3].strip()
-            elif response_text.startswith("```json") and "```" in response_text[7:]:
-                response_text = response_text[7:].split("```")[0].strip()
-                
-            result = json.loads(response_text)
+            
+            # 处理完整的代码块格式（包含 ```json 和 ```）
+            if "```json" in response_text and "```" in response_text.split("```json", 1)[1]:
+                # 提取 ```json 和 最后一个 ``` 之间的内容
+                response_text = response_text.split("```json", 1)[1].split("```")[0].strip()
+            # 处理仅有 ``` 包裹的代码块
+            elif response_text.startswith("```") and "```" in response_text[3:]:
+                # 提取第一个 ``` 和 最后一个 ``` 之间的内容
+                response_text = response_text[3:].rsplit("```", 1)[0].strip()
+            
+            # 如果依然包含 JSON 格式字符串
+            if "{" in response_text and "}" in response_text:
+                # 提取第一个 { 到 最后一个 } 之间的内容
+                json_start = response_text.find("{")
+                json_end = response_text.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    response_text = response_text[json_start:json_end]
+            
+            try:
+                # 尝试解析 JSON
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # 如果解析失败，尝试简单构造一个默认的 JSON 结果
+                print(f"[警告] JSON解析失败，使用默认NO_EVENT。原始响应: {response}")
+                result = {"event": "NO_EVENT"}
             event_str = result.get("event", None)
             if event_str is not None:
                 # 记录预测的事件
@@ -393,8 +459,10 @@ class StatefulAgent:
                             })
                         return self.state_machine.state
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             error_msg = f"解析StatefulAgent事件json失败: {e}, response: {response}"
-            print_error(self.update_state, error_msg)
+            print_error(self.update_state, f"{error_msg}\n调用堆栈: \n{error_trace}")
             if hasattr(self, 'state_transition_feedback'):
                 self.state_transition_feedback.append({
                     "from_state": str(self.state_machine.state),

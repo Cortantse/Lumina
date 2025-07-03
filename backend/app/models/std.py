@@ -23,19 +23,6 @@ class StdJudgeContextResult:
 
     # 开始静默的时间，用于后续计算 actual_speaking_time
     silence_start_time: float = field(default=0) # 开始静默的时间戳
-
-    def judge_correct_std_result(self, interrupted_timestamp: float) -> bool:
-        """
-        设置并判断最近一次 std 是否有误
-        params:
-            interrupted_timestamp: float 打断时间戳
-        return:
-            bool 是否认为 std 判断正确
-        """
-        if self.judge_turn.timestamp - interrupted_timestamp < config.seen_as_wrong_std_threshold:
-            self.is_correct = False
-            return False # 认为打断是错误的 std
-        return True # 认为打断是正确的 std
         
 
 class DialogueStdFeedback(Enum):
@@ -156,17 +143,22 @@ class StdJudgeHistory:
         # 只获取最近的count条记录
         recent_history = self.history[-count:] if len(self.history) > count else self.history
         
+        # 记录已经添加的反馈数量，最多只保留最近两轮反馈
+        feedback_count = 0
+        max_feedback = 2
+        
         for i, item in enumerate(recent_history):
             # 添加用户转录内容
             user_content = f"用户说: {item.judge_turn.transcript}"
             
-            # 添加反馈信息（如果有）
-            if i > 0:  # 不是第一条记录
+            # 添加反馈信息（如果有），但只添加最近两轮的反馈
+            if i > 0 and feedback_count < max_feedback:  # 不是第一条记录且反馈数未达上限
                 prev_item = recent_history[i-1]
                 if prev_item.has_interruption or prev_item.actual_speaking_time > 0:
                     feedback = self._generate_feedback_for_prompt(prev_item)
                     if feedback:
                         user_content = f"{feedback}\n{user_content}"
+                        feedback_count += 1
             
             results.append({
                 "role": "user",
@@ -268,7 +260,8 @@ class StdJudgeHistory:
             elif cooldown_window <= natural_delay:
                 feedback = f"[系统反馈：上次判断表现良好。设置的等待时间({cooldown_window}ms)接近人类自然感知延迟({natural_delay}ms)，保持了良好的响应速度]"
         
-        print("[调试]std 生成反馈提示: ", feedback)
+        if feedback:
+            print("[调试]std 生成反馈提示: ", feedback)
 
         return feedback
     

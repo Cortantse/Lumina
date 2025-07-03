@@ -1,12 +1,11 @@
 # app/std/std_distribute.py STD分发模块
 import asyncio
 from typing import Optional
-from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, AgentResponseTurn
+from app.models.context import ExpandedTurn
 from app.utils.request import send_request_async
 from app.llm.qwen_client import _global_to_be_processed_turns, _llm_context
 from app.core import config
 from app.models.std import StdJudgeHistory
-from app.protocols.context import ToBeProcessedTurns
 from app.std.timer import Timer
 from app.std.dialogue_std import dialogue_std
 from app.std.state_machine import AnswerOnceState, DialogueState, ProactiveState, SilenceState, State
@@ -59,6 +58,8 @@ async def distribute_semantic_turn_detection(round_context: ExpandedTurn) -> Tim
         elif isinstance(state, SilenceState):
             # 如果状态机判断为静默状态，则返回几乎无限的计时器，但需要使用者根据这个 state 取消发送
             timer.set_timeout_and_start(99999999999, state)
+            _global_to_be_processed_turns.silence_duration = (0, "")
+            _global_to_be_processed_turns.silence_duration_auto_increase = False # 禁止模型回答
             return timer
         elif isinstance(state, AnswerOnceState):
             # 如果状态机判断为回答一次状态，则返回瞬间计时器，立马发送
@@ -70,12 +71,16 @@ async def distribute_semantic_turn_detection(round_context: ExpandedTurn) -> Tim
             return timer
         else:
             # 未识别的状态，使用默认对话状态处理
-            print_error(distribute_semantic_turn_detection, f"未识别的状态: {state}，使用默认对话状态")
+            import traceback
+            error_trace = traceback.format_exc()
+            print_error(distribute_semantic_turn_detection, f"未识别的状态: {state}，使用默认对话状态\n调用堆栈: \n{error_trace}")
             timer.set_timeout_and_start(dialogue_std_result, DialogueState())
             return timer
     except Exception as e:
         # 异常情况下，返回默认的计时器
-        print_error(distribute_semantic_turn_detection, f"STD分发异常: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(distribute_semantic_turn_detection, f"STD分发异常: {e}\n调用堆栈: \n{error_trace}")
         timer.set_timeout_and_start(config.mid_std_waiting_time, DialogueState())
         return timer
 

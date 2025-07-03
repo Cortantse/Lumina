@@ -17,9 +17,9 @@ mid_silence_timeout = 500 # 中静默时间，单位：毫秒, 提示用户 我�
 long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush 当前会话
 
 # stt 参数
-max_sentence_silence = 200 # 最大句子静默时间，单位：毫秒
-max_single_segment_time = 30000 # 最大单个句子时间，单位：毫秒
-max_end_silence = 80 # 最大结束静默时间，单位：毫秒
+max_sentence_silence = 300 # 最大句子静默时间，单位：毫秒
+max_single_segment_time = 5000 # 最大单个句子时间，单位：毫秒
+max_end_silence = 400 # 最大结束静默时间，单位：毫秒
 reconnection_delay = 0.1 # 重连延迟时间，单位：秒
 
 
@@ -27,9 +27,8 @@ reconnection_delay = 0.1 # 重连延迟时间，单位：秒
 use_round_count = 6 # 使用多少轮历史记录来生成预回复
 
 # std 参数
-seen_as_wrong_std_threshold = 1500 # 认为是错误std的阈值，超过这个时间认为是正常的打断而不是错误 std，单位：毫秒
 recent_judge_context_count = 14 # 最近 std 判断上下文数量
-critical_threshold = 1500 # 临界阈值，单位：毫秒，1.5s内用户说话则认为用户再延续发言
+critical_threshold = 800 # 临界阈值，单位：毫秒，0.8s内用户说话则认为用户再延续发言
 
 # STD判断过于保守相关参数
 conservative_threshold_ratio_mild = 1/3  # 轻度保守的冷却窗口比例（相对于临界阈值）

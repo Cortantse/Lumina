@@ -8,7 +8,7 @@ from app.models.context import LLMContext, ExpandedTurn, AgentResponseTurn, Mult
 from app.protocols.context import ToBeProcessedTurns, add_new_transcript_to_context
 from app.utils.sentence_breaker import _find_sentence_break
 from app.utils.sentence_breaker import _process_long_sentence
-from app.utils.exception import print_error
+from app.utils.exception import print_error, print_warning
 from app.verify.main_generation import delete_unvalid_emotion_tags
 from app.std.timer import Timer
 
@@ -25,7 +25,10 @@ _llm_context = LLMContext(
 
 === 二、输入变量 ===
 - 用户最新转写文本：由系统注入为最后一条用户消息。
-- 预回复内容：${{pre_reply}}，格式为一句 2–10 字的承接短语（含情绪标）。
+- 预回复内容：${{pre_reply}}，格式为一句 2–10 字的承接短语（含情绪标），其结构如下：
+```text
+[情绪标签] 承接短语,
+```
 
 === 三、输出格式 ===
 1. **情绪标注**  
@@ -94,11 +97,107 @@ pre_reply：“你好呀,”
 === 七、丰富情感 ===
 请你尽量丰富你的情感，使用不同的情感标注，并尽量避免重复使用相同的情感标注，你可以参考历史。
 
-
+=== 八、特别重要 ===
+请**不要**重复 pre_reply 的语气词，下面的场景是明确禁止的：
+```text
+用户：“你好”
+pre_reply：“你好呀,”
+主回复：[HAPPY]
+你好,（重复了 pre_reply 的你好）
+```
+```text
+用户：“那很不错”
+pre_reply：“好的,”
+主回复：[HAPPY]
+好的,（重复了 pre_reply 的好的）
+```
+```text
+用户：“继续说”
+pre_reply：“继续说,”
+主回复：[HAPPY]
+继续说,（重复了 pre_reply 的继续说）
+```
    """
    )
 
 
+def remove_duplicated_prefix(pre_reply: str, response: str) -> str:
+    """
+    检测并移除主回复中与pre_reply重复的前缀部分
+    
+    Args:
+        pre_reply: 预回复内容
+        response: 主回复内容
+    
+    Returns:
+        处理后的主回复内容
+    """
+    # 定义情绪标签列表
+    emotion_tags = ["[NEUTRAL]", "[HAPPY]", "[SAD]", "[ANGRY]", "[FEARFUL]", "[DISGUSTED]", "[SURPRISED]"]
+    
+    # 清理pre_reply中的情绪标签，只保留文本内容
+    clean_pre_reply = pre_reply
+    for tag in emotion_tags:
+        clean_pre_reply = clean_pre_reply.replace(tag, "").strip()
+    
+    # 去掉pre_reply末尾的逗号或标点
+    if clean_pre_reply.endswith(",") or clean_pre_reply.endswith("，"):
+        clean_pre_reply = clean_pre_reply[:-1].strip()
+    
+    # 如果清理后的pre_reply为空，直接返回原始响应
+    if not clean_pre_reply:
+        return response
+    
+    # 找到所有情感标签在response中的位置和内容
+    tag_positions = []
+    for tag in emotion_tags:
+        start = 0
+        while True:
+            pos = response.find(tag, start)
+            if pos == -1:
+                break
+            tag_positions.append((pos, pos + len(tag)))
+            start = pos + 1
+    
+    # 按位置排序标签
+    tag_positions.sort()
+    
+    # 如果没有找到情感标签，直接检查文本重复
+    if not tag_positions:
+        if response.strip().startswith(clean_pre_reply):
+            trimmed = response.strip()[len(clean_pre_reply):].strip()
+            if trimmed.startswith(",") or trimmed.startswith("，"):
+                trimmed = trimmed[1:].strip()
+            return trimmed
+        return response
+    
+    # 提取所有情感标签
+    all_tags = []
+    content_start = -1
+    for start, end in tag_positions:
+        all_tags.append(response[start:end])
+        if content_start == -1 or end > content_start:
+            content_start = end
+    
+    # 如果找不到情感标签结束位置，返回原始响应
+    if content_start == -1:
+        return response
+    
+    # 提取情感标签部分和内容部分
+    emotion_part = response[:content_start].strip()
+    content_part = response[content_start:].strip()
+    
+    # 检查内容部分是否以clean_pre_reply开头
+    if content_part.startswith(clean_pre_reply):
+        # 移除重复部分
+        content_part = content_part[len(clean_pre_reply):].strip()
+        # 如果移除后的内容以逗号开头，也去掉它
+        if content_part.startswith(",") or content_part.startswith("，"):
+            content_part = content_part[1:].strip()
+        # 重新组合情感标签和去重后的内容
+        return f"{emotion_part}\n{content_part}"
+    
+    return response
 
 
 async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str, None]]:
@@ -111,9 +210,12 @@ async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str
         timer, pre_reply = await add_new_transcript_to_context(text, _global_to_be_processed_turns, _llm_context)  
         if timer is None:
             # 说明还没有结束，直接返回
+            print_warning(simple_send_request_to_llm, "timer 为 None")
             return None, empty_async_generator()
     except Exception as e:
-        print_error(add_new_transcript_to_context, e)
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"添加新转录到上下文失败: {e}\n调用堆栈: \n{error_trace}")
         return None, empty_async_generator()
     
     # 获取格式化后的消息列表
@@ -136,11 +238,14 @@ async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str
     if not timer.assure_no_interruption():
         # 说明用户打断，需要重置上下文，并叫停 tts，因为此时还没有生成任何内容，所以需要重置 context，但下面的 response_generator 会处理生成一般打断的情况（不重置上下文）
         timer.reset_global_to_be_processed_turns_and_llm_context()
+        print_warning(simple_send_request_to_llm, "用户打断，重置上下文")
         return None, empty_async_generator()
     
     async def response_generator(timer: Timer) -> AsyncGenerator[str, None]:
         nonlocal full_response, current_sentence
         interrupted = False  # 添加打断标记
+        first_sentence = True  # 标记是否是第一个句子
+        
         try:
             # 使用流式请求处理每个响应块
             async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-plus-latest"):
@@ -149,8 +254,11 @@ async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str
 
                 # 如果用户打断，则停止生成
                 if not timer.assure_no_interruption():
+                    # 将打断信息只添加到保存历史的full_response，不传递给TTS
                     full_response += "[你的回复被用户打断了......如果你的后续内容很重要，可以下次告诉用户；如果不重要，可以忽略；请你根据当前对话的性质选择是否需要告诉用户，像真人一样]"
                     interrupted = True  # 设置打断标记
+                    # 清空当前句子，确保不会继续处理
+                    current_sentence = ""
                     break
  
                 # 尝试使用句末标点分割句子
@@ -160,8 +268,15 @@ async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str
                     found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
                     while found:
                         found_any = True
-                        # 情感标签不需要在这里处理，直接发送完整句子，删除无效的情感标签
-                        yield delete_unvalid_emotion_tags(complete)
+                        # 处理完整句子
+                        processed_sentence = delete_unvalid_emotion_tags(complete)
+                        
+                        # 对第一个句子执行重复检测
+                        if first_sentence:
+                            processed_sentence = remove_duplicated_prefix(pre_reply, processed_sentence)
+                            first_sentence = False
+                            
+                        yield processed_sentence
                         current_sentence = remaining
                         found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
                 
@@ -169,15 +284,27 @@ async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str
                 if not found_any:
                     should_break, complete, remaining = _process_long_sentence(current_sentence)
                     if should_break:
-                        # 情感标签不需要在这里处理，直接发送完整句子
-                        yield complete
+                        # 处理完整句子
+                        processed_sentence = complete
+                        
+                        # 对第一个句子执行重复检测
+                        if first_sentence:
+                            processed_sentence = remove_duplicated_prefix(pre_reply, processed_sentence)
+                            first_sentence = False
+                            
+                        yield processed_sentence
                         current_sentence = remaining
             
             # 处理结束后，发送剩余内容
             if current_sentence and not interrupted:  # 只有在未被打断的情况下才发送剩余内容
+                # 对最后部分也进行检查
+                if first_sentence:  # 如果整个回复只有一个句子
+                    current_sentence = remove_duplicated_prefix(pre_reply, current_sentence)
                 yield current_sentence
             
             # 将模型响应添加到上下文历史（无论是否打断都要添加）
+            # 在保存到历史记录前，确保整个回复不会重复pre_reply
+            full_response = remove_duplicated_prefix(pre_reply, full_response)
             _llm_context.history.append(AgentResponseTurn(response=full_response, pre_reply=pre_reply))
 
             # 添加到stateful_agent

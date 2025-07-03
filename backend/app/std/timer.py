@@ -30,7 +30,9 @@ class Timer:
                 except Exception as e:
                     # 如果无法深拷贝，则保存引用
                     self.saved_context[key] = value
-                    print_error(Timer.__init__, f"错误: {e} 无法深拷贝上下文变量: {key}")
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print_error(Timer.__init__, f"错误: {e} 无法深拷贝上下文变量: {key}\n调用堆栈: \n{error_trace}")
         self.state = None
         self.pass_timeout = False
         self.start_time = time.time() # 现在就开始计时
@@ -99,7 +101,9 @@ class Timer:
 
         # 检查是否有必要的参数
         if "uuid" not in self.saved_context or not hasattr(self, "timeout"):
-            print_error(Timer.wait_for_timeout, "错误: 缺乏 uuid 或 timeout")
+            import traceback
+            error_trace = traceback.format_exc()
+            print_error(Timer.wait_for_timeout, f"错误: 缺乏 uuid 或 timeout\n调用堆栈: \n{error_trace}")
             return False
             
         from app.llm.qwen_client import _global_to_be_processed_turns
@@ -122,7 +126,9 @@ class Timer:
             await asyncio.sleep(0.002)
             
         # 达到检查次数上限但还未超时，理论上不可能
-        print_error(Timer.wait_for_timeout, "错误: 达到检查次数上限但还未超时")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(Timer.wait_for_timeout, f"错误: 达到检查次数上限但还未超时\n调用堆栈: \n{error_trace}")
         return False
 
     def assure_no_interruption(self) -> bool:
@@ -131,6 +137,8 @@ class Timer:
         """
         from app.llm.qwen_client import _global_to_be_processed_turns
         if self.saved_context["uuid"] != _global_to_be_processed_turns.silence_duration[1]:
+            # print_warning(self.assure_no_interruption, f"[调试] 用户打断，旧uuid: {self.saved_context['uuid']}, 新uuid: {_global_to_be_processed_turns.silence_duration[1]}")
+            # print_warning(self.assure_no_interruption, f"[调试] 静音时长: {_global_to_be_processed_turns.silence_duration}")
             return False
         return True
 

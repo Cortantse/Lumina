@@ -101,6 +101,8 @@ class AliCloudConfig:
             raise
 
 
+import app.global_vars as global_vars
+
 class AliCloudSTTAdapter(STTClient):
     """阿里云实时语音识别适配器
     
@@ -198,11 +200,11 @@ class AliCloudSTTAdapter(STTClient):
                     aformat="pcm",  # 音频格式：PCM格式
                     sample_rate=16000,  # 采样率16kHz
                     enable_intermediate_result=True,  # 启用中间结果返回
-                    enable_punctuation_prediction=True,  # 启用标点符号预测
-                    enable_inverse_text_normalization=True,  # 启用中文数字转阿拉伯数字
+                    enable_punctuation_prediction=False,  # 启用标点符号预测
+                    enable_inverse_text_normalization=False,  # 启用中文数字转阿拉伯数字
                     ex={
-                        # "disfluency": True,
-                        # "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
+                        "disfluency": True,
+                        # "enable_semantic_sentence_detection": True,  # 启用语义断句，更智能的句子边界检测
                         # 语音断句检测阈值，静音时长超过该阈值会被认为断句
                         # 范围：200-6000ms，默认800ms
                         # 注意：启用语义断句后此参数无效
@@ -227,7 +229,7 @@ class AliCloudSTTAdapter(STTClient):
                 )
         
         # 创建并启动线程
-        print("【调试】创建并启动识别会话线程")
+        # print("【调试】创建并启动识别会话线程")
         thread = threading.Thread(target=start_in_thread)
         thread.daemon = True  # 设为守护线程，主程序退出时自动结束
         thread.start()
@@ -402,6 +404,7 @@ class AliCloudSTTAdapter(STTClient):
                 self.current_text = new_text
                 self.is_final = False  # 标记为非最终结果
                 print(f"【调试】中间识别结果: '{self.current_text}'")
+                global_vars.stt_ended = False
                 
                 # 删除tts中正在进行的内容，如果用户正在说话
                 if len(self.current_text) > 0:
@@ -411,6 +414,8 @@ class AliCloudSTTAdapter(STTClient):
                     # 设置静音时长
                     from app.llm.qwen_client import _global_to_be_processed_turns
                     _global_to_be_processed_turns.silence_duration_auto_increase = False
+                    _global_to_be_processed_turns.silence_duration = (0, "")
+                    # print(f"[调试] 设置静音时长: {_global_to_be_processed_turns.silence_duration}")
 
                 
         except Exception as e:
@@ -433,6 +438,13 @@ class AliCloudSTTAdapter(STTClient):
             if 'payload' in result and 'result' in result['payload']:
                 sentence_text = result['payload']['result']
                 print(f"STT识别结果: '{sentence_text}' [句子完成]")
+                
+                # 使用事件循环运行异步函数
+                from app.llm.qwen_client import _global_to_be_processed_turns
+                asyncio.run_coroutine_threadsafe(
+                    _global_to_be_processed_turns.set_silence_duration(0), 
+                    self.loop
+                )
                 
                 # 添加到完整句子缓冲区
                 with self.sentences_lock:
@@ -619,7 +631,7 @@ class AliCloudSTTAdapter(STTClient):
                         self.transcriber = None
                 
                 # 等待一小段时间后再重连
-                await asyncio.sleep(config.reconnection_delay)  # 增加延迟，防止过快重连
+                await asyncio.sleep(1.0)  # 增加延迟，防止过快重连
                 
                 # 重置future和result_ready事件，准备新会话
                 self.future = self.loop.create_future()
@@ -660,7 +672,7 @@ class AliCloudSTTAdapter(STTClient):
                     and not self._refreshing
                     and not self.reconnecting
                 ):
-                    print(f"【調試】靜默 {silent:.1f}s，啟動主動刷新")
+                    # print(f"【調試】靜默 {silent:.1f}s，啟動主動刷新")
                     await self._proactive_refresh()
         except asyncio.CancelledError:
             pass

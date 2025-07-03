@@ -121,7 +121,7 @@ class ControlMessageHandler:
                 silence_duration = struct.unpack("<Q", silence_bytes)[0]
                 
                 # 记录静音时长
-                loop.create_task(_global_to_be_processed_turns.set_silence_duration(silence_duration))
+                # loop.create_task(_global_to_be_processed_turns.set_silence_duration(silence_duration))
 
                 
             else:

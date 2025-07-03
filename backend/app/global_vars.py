@@ -6,3 +6,6 @@
 pipeline_service = None
 websocket_handler = None
 socket_handler = None
+
+# 全局结束 stt 标志
+stt_ended = False

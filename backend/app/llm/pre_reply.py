@@ -1,5 +1,6 @@
 # app.llm.pre_reply.py 生成当前最新的预回复，std 通过后即可使用
 
+import re
 from app.models.context import LLMContext, MultipleExpandedTurns
 from app.protocols.context import ToBeProcessedTurns
 from app.utils.request import send_request_async
@@ -23,7 +24,8 @@ prompt = """
 === 三、生成约束 ===
 1. **连贯**：与后续主回复不冲突；方便自然过渡。  
 2. **多样**：避免模板化，参照以下词库随机组合。  
-3. **长度**：2–7 字，仅一个情绪标签。  
+3. **长度**：2–7 字，仅一个情绪标签。
+4. **符号**：只能用一个符号，不能用多个符号。
 
 === 四、情绪映射（启发式） ===
 - 出现积极词 → [HAPPY]  
@@ -47,7 +49,11 @@ prompt = """
 用户转写：“请介绍一下你的功能”
 输出：
 [HAPPY]
-很好,
+好的,
+
+=== 七、输出格式 ===
+```[情绪标签]\n承接短语，```
+承接短语内不能有任何符号，只有最后一个字符是逗号
 """
 
 
@@ -84,11 +90,11 @@ async def add_pre_reply(to_be_processed_turns: ToBeProcessedTurns, llm_context: 
                 turn["content"] += "\n 以下是系统提示：请你继续坚持 system prompt的要求，不要改变。" 
                 break
 
-        # 调试
-        print(f"【调试】发送消息: {messages[1:]}")
 
         # 生成预回复
         response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
+
+        print(f"【调试】预回复: {response}")
 
         # 粘贴到正在处理的轮那，方便后续std 通过后播放
         to_be_processed_turns.pre_reply = (response, len(to_be_processed_turns.all_transcripts_in_current_turn))

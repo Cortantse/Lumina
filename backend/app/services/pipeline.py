@@ -1,5 +1,6 @@
 # app/services/pipeline.py 将 STT -> STD -> Memory -> LLM -> TTS 串联起来
 
+import traceback
 from typing import Optional, Any, List, Callable, Dict, AsyncGenerator, cast
 import asyncio
 import time
@@ -267,7 +268,7 @@ class PipelineService:
                     # print(f"【调试】[TTS处理器] 处理句子: {sentence}")
                     emotion, cleaned_sentence = retrieve_emotion_and_cleaned_sentence_from_text(sentence)
                     if emotion != current_emotion and emotion is not None and emotion != TTSApiEmotion.NEUTRAL:
-                        print(f"【调试】[TTS处理器] 从{current_emotion}切换到{emotion}")
+                        # print(f"【调试】[TTS处理器] 从{current_emotion}切换到{emotion}")
                         current_emotion = emotion
                         time_stamp = time.time()
 
@@ -318,6 +319,8 @@ class PipelineService:
 
                     # 启动异步任务处理LLM响应
                     asyncio.create_task(self._process_llm_response(text))
+
+                await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
                 # print("【调试】STT缓冲区监控任务被取消")
@@ -347,6 +350,9 @@ class PipelineService:
             # 确保生成器不为None
             if not llm_response_generator or timer is None:
                 print(f"【警告】[Pipeline] LLM响应生成器为None，可能是调用失败")
+                print(f"[调试] 调用堆栈: {traceback.format_exc()}")
+                print(f"[调试] llm_response_generator: {llm_response_generator}")
+                print(f"[调试] timer: {timer}")
                 return
                 
             # 处理每个生成的完整句子
@@ -392,11 +398,19 @@ class PipelineService:
         """
         获取我在听音频块
         """
+        if not self.tts_client:
+            await self.init_tts_client()
+            if not self.tts_client:
+                print("【错误】无法获取TTS客户端，无法生成'我在听'音频")
+                return None
+                
         audio_stream = self.tts_client.send_tts_request(None, "我在听，请继续说")
-        self.litening_audio_stream = audio_stream
+        return audio_stream
 
     async def send_listening_template(self):
         """
         发送我在听音频块
         """
-        await send_tts_audio_stream(self.litening_audio_stream)
+        audio_stream = await self.get_listening_template()
+        if audio_stream:
+            await send_tts_audio_stream(audio_stream)

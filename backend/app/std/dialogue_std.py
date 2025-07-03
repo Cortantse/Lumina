@@ -5,7 +5,6 @@ from app.models.std import StdJudgeContextResult
 from app.std.timer import Timer
 from app.utils.exception import print_error
 from app.utils.request import send_request_async
-from app.std.std_distribute import std_judge_history
 from app.core import config
 
 system_prompt="""你是一个语义完整性判断助手，负责预测用户何时说完一句话，轮到 agent 回答用户了。你的任务是根据当前对话内容和历史判断结果，预测用户此轮是否已经说完话，并返回建议的等待时间(毫秒)。
@@ -36,7 +35,7 @@ system_prompt="""你是一个语义完整性判断助手，负责预测用户何
 
 【输出要求】
 - 仅输出一个整数，表示建议等待的毫秒数(ms)
-- 在50-800ms之间选择适当的等待时间
+- 在0-800ms之间选择适当的等待时间
 - 根据语义完整度和历史反馈动态调整
 - 建议优先选择250ms左右的值，然后根据具体情况上下浮动
 
@@ -63,6 +62,7 @@ async def dialogue_std(round_context: ExpandedTurn, timer: Timer) -> int:
     returns:
         int: ms，表示愿意等待的时间
     """
+    from app.std.std_distribute import std_judge_history
     # 先加入到最新的 std 判断历史，方便后续打断能够添加实际插话时间
     judge_round = StdJudgeContextResult(judge_turn=round_context, silence_start_time=timer.start_time)
     std_judge_history.add_judge_context_result(judge_round)
@@ -89,6 +89,8 @@ async def dialogue_std(round_context: ExpandedTurn, timer: Timer) -> int:
     # 调用LLM获取响应
     response, _, _ = await send_request_async(messages, "qwen-turbo-latest")
 
+    print(f"[调试] Dialogue STD 响应，判断延迟: {response}")
+
     # 解析响应，提取数字结果
     try:
         # 确保响应不为None
@@ -105,7 +107,9 @@ async def dialogue_std(round_context: ExpandedTurn, timer: Timer) -> int:
         # 确保结果在合理范围内
         # result = min(result, config.extra_std_waiting_time)
     except Exception as e:
-        print_error(dialogue_std, f"解析STD结果失败: {e}，使用默认值")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(dialogue_std, f"解析STD结果失败: {e}，使用默认值\n调用堆栈: \n{error_trace}")
         result = config.mid_std_waiting_time
 
     # 记录结果

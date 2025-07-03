@@ -1,21 +1,26 @@
 # app.protocols.context.py 上下文修改协议
 import asyncio
-import uuid
-import time
+import copy
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, cast
-from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, SystemContext
+import time
+from typing import Dict, List, Optional, Tuple, cast
+import uuid
+
+from app.command.manager import get_command_detector, get_executor_manager
+from app.core import config
+import app.global_vars as global_vars
+from app.memory.store import get_memory_manager
+from app.models.context import (
+    ExpandedTurn,
+    LLMContext,
+    MultipleExpandedTurns,
+    SystemContext,
+)
 from app.models.image import ImageInput
 from app.protocols.memory import Memory, MemoryType
-from app.memory.store import get_memory_manager
-from app.command.manager import get_command_detector, get_executor_manager
-from app.utils.exception import print_error, print_warning
-import app.global_vars as global_vars
-from app.std.timer import Timer
-import copy
-
-from app.core import config
 from app.services.pipeline import PipelineService
+from app.std.timer import Timer
+from app.utils.exception import print_error, print_warning
 """
 为了方便修改上下文，我们定义一个上下文修改协议，这个协议定义了如何修改上下文。
 
@@ -55,7 +60,6 @@ class ToBeProcessedTurns:
         清空缓冲区
         """
         self.all_transcripts_in_current_turn = []
-        self.silence_duration = (0, "")
         self.pre_reply = None
 
 
@@ -63,32 +67,40 @@ class ToBeProcessedTurns:
         """
         设置静音时长，会一直增长，直到stt有内容
         """
-        if self.silence_duration[0] == 0: # 为 0 时说明重新开始计时
-            self.silence_duration_auto_increase = True
-            uuid_value = str(uuid.uuid4())
-            start_time = time.time()
-            self.silence_duration = (silence_duration, uuid_value)
-            # 每 15ms 自动增长，除非被设置变量提示(STT设置提示)
-            while self.silence_duration_auto_increase:
-                await asyncio.sleep(0.015)
-                current_time = time.time()
-                elapsed_ms = int((current_time - start_time) * 1000)
-                self.silence_duration = (silence_duration + elapsed_ms, self.silence_duration[1])
+        
+        if self.silence_duration[0] == 0: # 为 0 时说明重新开始计时，stt 结束后才开始计时
+                self.silence_duration = (silence_duration, str(uuid.uuid4()))
+                print_warning(self.set_silence_duration, f"[调试] 开始设置静音时长，静音时长: {self.silence_duration}")
+                self.silence_duration_auto_increase = True
+                start_time = time.time()
+                # 每 15ms 自动增长，除非被设置变量提示(STT设置提示)
+                while self.silence_duration_auto_increase:
+                    await asyncio.sleep(0.015)
+                    current_time = time.time()
+                    elapsed_ms = int((current_time - start_time) * 1000)
+                    self.silence_duration = (silence_duration + elapsed_ms, self.silence_duration[1])
 
-                # [TODO] 在这里处理 短、中、长超时的情况，相当于静音事件驱动
-                if self.silence_duration[0] > config.mid_silence_timeout:
-                    # 中静默时间超时，提示用户我在听
-                    pipeline = cast(PipelineService, global_vars.pipeline_service)
-                    asyncio.create_task(pipeline.send_listening_template())
+                    # [TODO] 在这里处理 短、中、长超时的情况，相当于静音事件驱动
+                    if self.silence_duration[0] > config.mid_silence_timeout:
+                        # 中静默时间超时，提示用户我在听
+                        pipeline = cast(PipelineService, global_vars.pipeline_service)
+                        # asyncio.create_task(pipeline.send_listening_template())
 
-            # 记录打断时间
-            from app.std.std_distribute import std_judge_history
-            if len(std_judge_history.history) < config.critical_threshold: # 只记录小于 critical_threshold 的，认为是打断
-                std_judge_history.history[-1].actual_speaking_time = self.silence_duration[0] # 是当前静音时长
-                std_judge_history.history[-1].has_interruption = True # 打断标记
+                # 记录打断时间
+                try:
+                    # 在局部范围内导入以避免循环导入
+                    from app.std.std_distribute import std_judge_history
+                    if len(std_judge_history.history) < config.critical_threshold: # 只记录小于 critical_threshold 的，认为是打断
+                        print_warning(self.set_silence_duration, f"[调试] 记录打断，静音时长: {self.silence_duration}")
+                        std_judge_history.history[-1].actual_speaking_time = self.silence_duration[0] # 是当前静音时长
+                        std_judge_history.history[-1].has_interruption = True # 打断标记
+                except Exception as e:
+                    # 发生导入错误时的处理
+                    print_error(self.set_silence_duration, f"无法导入std_judge_history，可能是循环导入问题: {e}")
 
-            # 退出重置
-            self.silence_duration = (0, "")
+                # 退出重置
+                print_warning(self.set_silence_duration, f"[调试] 退出静音时长设置，静音时长: {self.silence_duration}")
+                self.silence_duration = (0, "")
 
 
 # ---- 接口：std 判断是否结束 ---- #
@@ -403,7 +415,9 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         # 放到缓冲区中
         _global_to_be_processed_turns.all_transcripts_in_current_turn.append(new_turn)
     except Exception as e:
-        print_error(add_new_transcript_to_context, f"构建ExpandedTurn时发生错误: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"构建ExpandedTurn时发生错误: {e}\n调用堆栈: \n{error_trace}")
         return None, ""
 
     try:
@@ -412,7 +426,9 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
             add_pre_reply(_global_to_be_processed_turns, _llm_context)
         )
     except Exception as e:
-        print_error(add_new_transcript_to_context, f"创建pre_reply_task失败: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"创建pre_reply_task失败: {e}\n调用堆栈: \n{error_trace}")
         return None, ""
 
     try:
@@ -421,7 +437,9 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
             is_ended_by_std(_global_to_be_processed_turns, _llm_context, pre_reply_task)
         )
     except Exception as e:
-        print_error(add_new_transcript_to_context, f"创建std_task失败: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"创建std_task失败: {e}\n调用堆栈: \n{error_trace}")
         return None, ""
 
     try:
@@ -459,7 +477,9 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         # 只获取std的结果
         results = gather_results[0]
     except Exception as e:
-        print_error(add_new_transcript_to_context, f"await asyncio.gather失败: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"await asyncio.gather失败: {e}\n调用堆栈: \n{error_trace}")
         return None, ""
     
     try:
@@ -468,6 +488,10 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
             print("[调试] timer 为 None，打断了")
             return None, ""
         timer = cast(Timer, timer)
+        from app.std.state_machine import SilenceState
+        if timer.state == SilenceState:
+            print("[调试] 静默状态")
+            return None, ""
     except Exception as e:
         print_error(add_new_transcript_to_context, f"解析results失败: {e}, results={results}, type={type(results)}")
         # 设置默认值，避免后续代码出错
@@ -475,6 +499,8 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
     
     # 如果std 为 true 则构造消息并交给大模型处理，过了这个点到生成前就要注意重置上下文问题
     try:
+        # 等待 10ms
+        await asyncio.sleep(0.01)
         if timer.assure_no_interruption(): # 检查没有打断
             # 从_global_to_be_processed_turns 插入到 _llm_context 中： 判断当前缓冲区有几个回合，从而进行添加
             if len(_global_to_be_processed_turns.all_transcripts_in_current_turn) > 1:
@@ -498,7 +524,9 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
             # 暂时不考虑，除非上下文暴增，否则不考虑
             return None, ""
     except Exception as e:
-        print_error(add_new_transcript_to_context, f"处理STD结果时出错: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print_error(add_new_transcript_to_context, f"处理STD结果时出错: {e}\n调用堆栈: \n{error_trace}")
         return None, ""
 
 
