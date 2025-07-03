@@ -1,7 +1,9 @@
 # app.protocols.context.py 上下文修改协议
 import asyncio
+import uuid
+import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, cast
 from app.models.context import ExpandedTurn, LLMContext, MultipleExpandedTurns, SystemContext
 from app.models.image import ImageInput
 from app.protocols.memory import Memory, MemoryType
@@ -9,6 +11,11 @@ from app.memory.store import get_memory_manager
 from app.command.manager import get_command_detector, get_executor_manager
 from app.utils.exception import print_error, print_warning
 import app.global_vars as global_vars
+from app.std.timer import Timer
+import copy
+
+from app.core import config
+from app.services.pipeline import PipelineService
 """
 为了方便修改上下文，我们定义一个上下文修改协议，这个协议定义了如何修改上下文。
 
@@ -25,62 +32,115 @@ class ToBeProcessedTurns:
     管理目前为止所有待处理的转录文本轮
     """
     all_transcripts_in_current_turn: list[ExpandedTurn] = field(default_factory=list)
-    silence_duration: int = 0 # 静音时长，ms计时
+    silence_duration: Tuple[int, str] = (0, "") # 静音时长，ms计时，第一个是静音时长，第二个是其 uuid
     pre_reply: Optional[tuple[str, int]] = None # 预回复，tuple[str, int]，第一个是预回复内容，第二个是预回复生成时的数字
+    timestamp: float = field(default_factory=lambda: time.time())
+
+    # 辅助信号
+    silence_duration_auto_increase: bool = False # 静音时长是否自动增长
+
+    def copy(self) -> "ToBeProcessedTurns":
+        """
+        创建一个当前上下文的副本
+        """
+        return ToBeProcessedTurns(
+            all_transcripts_in_current_turn=[copy.deepcopy(turn) for turn in self.all_transcripts_in_current_turn],
+            silence_duration=self.silence_duration,
+            pre_reply=self.pre_reply,
+            timestamp=self.timestamp
+        )
 
     def clear(self):
         """
         清空缓冲区
         """
         self.all_transcripts_in_current_turn = []
-        self.silence_duration = 0
+        self.silence_duration = (0, "")
         self.pre_reply = None
 
 
+    async def set_silence_duration(self, silence_duration: int):
+        """
+        设置静音时长，会一直增长，直到stt有内容
+        """
+        if self.silence_duration[0] == 0: # 为 0 时说明重新开始计时
+            self.silence_duration_auto_increase = True
+            uuid_value = str(uuid.uuid4())
+            start_time = time.time()
+            self.silence_duration = (silence_duration, uuid_value)
+            # 每 15ms 自动增长，除非被设置变量提示(STT设置提示)
+            while self.silence_duration_auto_increase:
+                await asyncio.sleep(0.015)
+                current_time = time.time()
+                elapsed_ms = int((current_time - start_time) * 1000)
+                self.silence_duration = (silence_duration + elapsed_ms, self.silence_duration[1])
+
+                # [TODO] 在这里处理 短、中、长超时的情况，相当于静音事件驱动
+                if self.silence_duration[0] > config.mid_silence_timeout:
+                    # 中静默时间超时，提示用户我在听
+                    pipeline = cast(PipelineService, global_vars.pipeline_service)
+                    asyncio.create_task(pipeline.send_listening_template())
+
+            # 记录打断时间
+            from app.std.std_distribute import std_judge_history
+            if len(std_judge_history.history) < config.critical_threshold: # 只记录小于 critical_threshold 的，认为是打断
+                std_judge_history.history[-1].actual_speaking_time = self.silence_duration[0] # 是当前静音时长
+                std_judge_history.history[-1].has_interruption = True # 打断标记
+
+            # 退出重置
+            self.silence_duration = (0, "")
+
+
 # ---- 接口：std 判断是否结束 ---- #
-async def is_ended_by_std(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext, pre_reply_task) -> tuple[bool, str]:
+async def is_ended_by_std(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext, pre_reply_task) -> tuple[Optional[Timer], str]:
     """
     std 判断是否结束
+    std 可以和 pre-reply 同时进行
+    收到 timer 后检查是否需要发送 pre-reply以及是否需要发起主任务
+    args:
+        to_be_processed_turns: 目前为止所有待处理的转录文本轮，即缓冲区未被提供给 llm 的转录文本以及多模态信息
+        llm_context: 当前的所有上下文，不包括 to_be_processed_turns 中的，
+                      只有最终 to_be_processed_turns 中的转录文本会被 加入到 llm_context 中并提供给 llm 处理
+        pre_reply_task: 预回复任务
+    returns:
+        tuple[Timer, str]: Timer对象，预回复
     """
     # 避免循环导入
-    from app.std.llm_based import simple_semantic_turn_detection
+    from app.std.std_distribute import distribute_semantic_turn_detection
     
     try:
-        is_ended = await simple_semantic_turn_detection(llm_context, to_be_processed_turns.all_transcripts_in_current_turn[-1].transcript)
+        # 创建一个异步std任务
+        std_task = asyncio.create_task(distribute_semantic_turn_detection(to_be_processed_turns.all_transcripts_in_current_turn[-1]))
+        # 一起等待两者
+        results = await asyncio.gather(std_task, pre_reply_task)
+        timer = results[0] # 获取计时器对象
+        pre_reply_result = results[1] # 字符串，预回复
     except Exception as e:
         print_error(is_ended_by_std, f"STD判断出错: {e}")
-        return False, ""
+        return None, ""
 
     try:
-        # 获取预回复结果
-        pre_reply_result = await pre_reply_task
-        
-        # 若结束，立马等待发送 pre-reply
-        if is_ended and pre_reply_result:  # 不为空
-            # 检查to_be_processed_turns.pre_reply是否存在
-            if to_be_processed_turns.pre_reply is None:
-                print_warning(is_ended_by_std, "预回复为None，无法发送", "中风险")
-                return is_ended, ""
-                
-            # 确保数量匹配
-            if len(to_be_processed_turns.all_transcripts_in_current_turn) == to_be_processed_turns.pre_reply[1]:
-                # 数量匹配，则发送预回复
-                print(f"【调试】发送预回复: {to_be_processed_turns.pre_reply[0]}")
-                await global_vars.pipeline_service.put_pre_reply_response(to_be_processed_turns.pre_reply[0])
-            else:
-                # 数量不匹配，则不发送
-                print_warning(is_ended_by_std, f"预回复数量不匹配，不发送, 预回复数量: {to_be_processed_turns.pre_reply[1]}, 当前轮次数量: {len(to_be_processed_turns.all_transcripts_in_current_turn)}")
-                return is_ended, ""
-        elif is_ended and not pre_reply_result:
-            print_warning(is_ended_by_std, "预回复为空，不发送", "中风险")
-            return is_ended, ""
-        
+        timer = cast(Timer, timer)
     except Exception as e:
-        print_error(is_ended_by_std, f"处理预回复时出错: {e}")
-        return is_ended, ""  # 出错时不发送预回复，但保持STD结果
+        print_error(is_ended_by_std, f"timer 为 None: {e}")
+        return None, ""
 
-        
-    return is_ended, to_be_processed_turns.pre_reply[0]
+    
+    # 简单检查下
+    if pre_reply_result is None:
+        print_error(is_ended_by_std, "预回复为None")
+        return None, ""
+
+    # 无需等待，直接生成 pre-reply收到许可直接发送
+    # is_ended = await timer.wait_for_timeout()
+
+    if timer.assure_no_interruption():
+        pipeline = cast(PipelineService, global_vars.pipeline_service)
+        await pipeline.put_pre_reply_response(pre_reply_result, timer)
+
+    # 这里无论打不打断都返回 timer，因为后续可以整理上下文
+    return timer, pre_reply_result
+
     
     
 
@@ -273,7 +333,6 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
 
 
 # --- 接口：指令识别 ---- #
-# [TODO] 浩斌在这里可以进行指令识别和添加你想添加的内容到上下文，但注意不要在这里写实际逻辑，调用你的模块的函数
 async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm_context: LLMContext) -> None:
     """
     进行指令识别，从而获取 相关记忆 和 新的全局状态
@@ -317,9 +376,10 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
 
 
 # ---- 添加内容到待处理区  ----
-async def add_new_transcript_to_context(transcript: str, _global_to_be_processed_turns: ToBeProcessedTurns, _llm_context: LLMContext, image_inputs: list[ImageInput] = None) -> tuple[bool, str]:
+async def add_new_transcript_to_context(transcript: str, _global_to_be_processed_turns: ToBeProcessedTurns, _llm_context: LLMContext, image_inputs: list[ImageInput] = None) -> tuple[Optional[Timer], str]:
     """
     添加新的转录文本到上下文
+    并同时运行 预回复 和 std 判断 和 指令识别 和 被动记忆添加
     args:
         transcript: 新的转录文本
         _global_to_be_processed_turns: 目前为止所有待处理的转录文本轮，即缓冲区未被提供给 llm 的转录文本以及多模态信息
@@ -328,7 +388,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         image_inputs: 新的多模态信息
 
     returns:
-        tuple[bool, str]: 是否结束，预回复
+        tuple[Optional[Timer], str]: 计时器，预回复
     """
     # 避免循环导入
     from app.llm.pre_reply import add_pre_reply
@@ -344,7 +404,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         _global_to_be_processed_turns.all_transcripts_in_current_turn.append(new_turn)
     except Exception as e:
         print_error(add_new_transcript_to_context, f"构建ExpandedTurn时发生错误: {e}")
-        return False, ""
+        return None, ""
 
     try:
         # 调用 pre-reply 生成
@@ -353,7 +413,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         )
     except Exception as e:
         print_error(add_new_transcript_to_context, f"创建pre_reply_task失败: {e}")
-        return False, ""
+        return None, ""
 
     try:
         # 调用 std
@@ -362,7 +422,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         )
     except Exception as e:
         print_error(add_new_transcript_to_context, f"创建std_task失败: {e}")
-        return False, ""
+        return None, ""
 
     try:
         # 调用指令识别
@@ -371,7 +431,7 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         )
     except Exception as e:
         print_error(add_new_transcript_to_context, f"创建instruction_recognition_task失败: {e}")
-        return False, ""
+        return None, ""
     
     try:
         # 调用被动记忆添加
@@ -380,10 +440,11 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         )
     except Exception as e:
         print_error(add_new_transcript_to_context, f"创建passive_memory_adding_task失败: {e}")
-        return False, ""
+        return None, ""
     
     try:
         # 一起等待三者，后两者已经自行写入了，无返回值
+        # [TODO] 后续可以考虑不等待 std，直接尝试生成 llm，大不了重置上下文
         gather_results = await asyncio.gather(std_task, instruction_recognition_task, passive_memory_adding_task, return_exceptions=True)
         
         for i, result in enumerate(gather_results):
@@ -393,25 +454,29 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
         # 检查第一个任务的结果是否为异常
         if isinstance(gather_results[0], Exception):
             print_error(add_new_transcript_to_context, f"STD任务发生异常，无法继续处理: {gather_results[0]}")
-            return False, ""
+            return None, ""
             
         # 只获取std的结果
         results = gather_results[0]
     except Exception as e:
         print_error(add_new_transcript_to_context, f"await asyncio.gather失败: {e}")
-        return False, ""
+        return None, ""
     
     try:
-        std_result, pre_reply = results[0], results[1]
+        timer, pre_reply = results[0], results[1] 
+        if timer is None:
+            print("[调试] timer 为 None，打断了")
+            return None, ""
+        timer = cast(Timer, timer)
     except Exception as e:
         print_error(add_new_transcript_to_context, f"解析results失败: {e}, results={results}, type={type(results)}")
         # 设置默认值，避免后续代码出错
-        std_result, pre_reply = False, ""
+        return None, ""
     
-    # 如果std 为 true 则构造消息并交给大模型处理
+    # 如果std 为 true 则构造消息并交给大模型处理，过了这个点到生成前就要注意重置上下文问题
     try:
-        if std_result:
-            # 判断当前缓冲区有几个回合，从而进行添加
+        if timer.assure_no_interruption(): # 检查没有打断
+            # 从_global_to_be_processed_turns 插入到 _llm_context 中： 判断当前缓冲区有几个回合，从而进行添加
             if len(_global_to_be_processed_turns.all_transcripts_in_current_turn) > 1:
                 # 多个回合，则构造 MultipleExpandedTurns
                 multiple_expanded_turns = MultipleExpandedTurns(turns=_global_to_be_processed_turns.all_transcripts_in_current_turn)
@@ -426,14 +491,15 @@ async def add_new_transcript_to_context(transcript: str, _global_to_be_processed
             _global_to_be_processed_turns.clear()
 
             # 结束
-            return True, pre_reply
+            return timer, pre_reply
         else:
             # 说明还没有结束
             # [TODO] 不能清空缓冲区，这里要添加最长逻辑，避免 agent 一直不说话时上下文不维护一直暴增的问题
-            return False, ""
+            # 暂时不考虑，除非上下文暴增，否则不考虑
+            return None, ""
     except Exception as e:
         print_error(add_new_transcript_to_context, f"处理STD结果时出错: {e}")
-        return False, ""
+        return None, ""
 
 
 

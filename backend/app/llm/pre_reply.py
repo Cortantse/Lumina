@@ -4,6 +4,7 @@ from app.models.context import LLMContext, MultipleExpandedTurns
 from app.protocols.context import ToBeProcessedTurns
 from app.utils.request import send_request_async
 from app.utils.exception import print_error
+from app.core import config
 
 prompt = """
 你是 Lumina 实时对话系统的“预回复”子模型。  
@@ -75,7 +76,7 @@ async def add_pre_reply(to_be_processed_turns: ToBeProcessedTurns, llm_context: 
             llm_context_copy.history.append(to_be_processed_turns.all_transcripts_in_current_turn[0])
 
         # 历史六轮 + 当前
-        messages.extend(llm_context_copy.format_for_llm(pre_reply=True)[1:][-13:]) # 注意先过滤掉原来的 system prompt
+        messages.extend(llm_context_copy.format_for_llm(pre_reply=True)[1:][- (1 + config.use_round_count * 2):]) # 注意先过滤掉原来的 system prompt
 
         # 提示system prompt
         for turn in reversed(messages):

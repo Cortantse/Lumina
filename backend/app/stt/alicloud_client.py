@@ -4,7 +4,7 @@ import os
 import asyncio
 import threading
 import time  # 添加time模块导入
-from typing import Optional, Any
+from typing import Optional, Any, cast
 from dataclasses import dataclass
 
 import nls
@@ -12,6 +12,7 @@ from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 import app.core.config as config
 from app.protocols.stt import STTClient, AudioData, STTResponse
+from app.services.pipeline import PipelineService
 
 
 @dataclass
@@ -401,6 +402,17 @@ class AliCloudSTTAdapter(STTClient):
                 self.current_text = new_text
                 self.is_final = False  # 标记为非最终结果
                 print(f"【调试】中间识别结果: '{self.current_text}'")
+                
+                # 删除tts中正在进行的内容，如果用户正在说话
+                if len(self.current_text) > 0:
+                    from app.global_vars import pipeline_service
+                    pipeline_service = cast(PipelineService, pipeline_service)
+                    pipeline_service.clear_tts_queue()
+                    # 设置静音时长
+                    from app.llm.qwen_client import _global_to_be_processed_turns
+                    _global_to_be_processed_turns.silence_duration_auto_increase = False
+
+                
         except Exception as e:
             print(f"【错误】处理中间结果出错: {e}")
     
@@ -607,7 +619,7 @@ class AliCloudSTTAdapter(STTClient):
                         self.transcriber = None
                 
                 # 等待一小段时间后再重连
-                await asyncio.sleep(1.0)  # 增加延迟，防止过快重连
+                await asyncio.sleep(config.reconnection_delay)  # 增加延迟，防止过快重连
                 
                 # 重置future和result_ready事件，准备新会话
                 self.future = self.loop.create_future()

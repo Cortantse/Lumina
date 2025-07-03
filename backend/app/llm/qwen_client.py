@@ -10,6 +10,7 @@ from app.utils.sentence_breaker import _find_sentence_break
 from app.utils.sentence_breaker import _process_long_sentence
 from app.utils.exception import print_error
 from app.verify.main_generation import delete_unvalid_emotion_tags
+from app.std.timer import Timer
 
 _global_to_be_processed_turns = ToBeProcessedTurns(all_transcripts_in_current_turn=[])
 
@@ -100,20 +101,20 @@ pre_reply：“你好呀,”
 
 
 
-async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
+async def simple_send_request_to_llm(text: str) -> tuple[Any, AsyncGenerator[str, None]]:
     """
     简单发送请求到LLM（使用流式输出），每遇到句子结束符就发送一个完整的句子
-    返回一个异步生成器，每次生成一个完整的句子
+    返回元组(timer, generator)，其中generator是一个异步生成器，每次生成一个完整的句子
     """
     # 将用户输入添加到待处理区
     try:
-        is_ended, pre_reply = await add_new_transcript_to_context(text, _global_to_be_processed_turns, _llm_context)
-        if not is_ended:
+        timer, pre_reply = await add_new_transcript_to_context(text, _global_to_be_processed_turns, _llm_context)  
+        if timer is None:
             # 说明还没有结束，直接返回
-            return
+            return None, empty_async_generator()
     except Exception as e:
         print_error(add_new_transcript_to_context, e)
-        return
+        return None, empty_async_generator()
     
     # 获取格式化后的消息列表
     messages = _llm_context.format_for_llm()
@@ -130,45 +131,70 @@ async def simple_send_request_to_llm(text: str) -> AsyncGenerator[str, None]:
     
     # 定义句子结束的标点符号
     sentence_end_marks = ['。', '！', '？', '…', '!', '?', '.']
+
+    # 发送前检查是否用户打断
+    if not timer.assure_no_interruption():
+        # 说明用户打断，需要重置上下文，并叫停 tts，因为此时还没有生成任何内容，所以需要重置 context，但下面的 response_generator 会处理生成一般打断的情况（不重置上下文）
+        timer.reset_global_to_be_processed_turns_and_llm_context()
+        return None, empty_async_generator()
     
-    try:
-        # 使用流式请求处理每个响应块
-        async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-plus-latest"):
-            full_response += chunk
-            current_sentence += chunk
-            
+    async def response_generator(timer: Timer) -> AsyncGenerator[str, None]:
+        nonlocal full_response, current_sentence
+        interrupted = False  # 添加打断标记
+        try:
+            # 使用流式请求处理每个响应块
+            async for chunk, total_token, generation_token in send_stream_request_async(messages, "qwen-plus-latest"):
+                full_response += chunk
+                current_sentence += chunk
 
-            # 尝试使用句末标点分割句子
-            found_any = False
+                # 如果用户打断，则停止生成
+                if not timer.assure_no_interruption():
+                    full_response += "[你的回复被用户打断了......如果你的后续内容很重要，可以下次告诉用户；如果不重要，可以忽略；请你根据当前对话的性质选择是否需要告诉用户，像真人一样]"
+                    interrupted = True  # 设置打断标记
+                    break
+ 
+                # 尝试使用句末标点分割句子
+                found_any = False
 
-            for end_mark in sentence_end_marks:
-                found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
-                while found:
-                    found_any = True
-                    # 情感标签不需要在这里处理，直接发送完整句子，删除无效的情感标签
-                    yield delete_unvalid_emotion_tags(complete)
-                    current_sentence = remaining
+                for end_mark in sentence_end_marks:
                     found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
+                    while found:
+                        found_any = True
+                        # 情感标签不需要在这里处理，直接发送完整句子，删除无效的情感标签
+                        yield delete_unvalid_emotion_tags(complete)
+                        current_sentence = remaining
+                        found, complete, remaining = _find_sentence_break(current_sentence, end_mark)
+                
+                # 如果没有找到句末标点但句子很长，使用其他分隔符
+                if not found_any:
+                    should_break, complete, remaining = _process_long_sentence(current_sentence)
+                    if should_break:
+                        # 情感标签不需要在这里处理，直接发送完整句子
+                        yield complete
+                        current_sentence = remaining
             
-            # 如果没有找到句末标点但句子很长，使用其他分隔符
-            if not found_any:
-                should_break, complete, remaining = _process_long_sentence(current_sentence)
-                if should_break:
-                    # 情感标签不需要在这里处理，直接发送完整句子
-                    yield complete
-                    current_sentence = remaining
-        
-        # 处理结束后，发送剩余内容
-        if current_sentence:
-            yield current_sentence
-        
-        # 将模型响应添加到上下文历史
-        _llm_context.history.append(AgentResponseTurn(response=full_response, pre_reply=pre_reply))
-        
-    except Exception as e:
-        print_error(simple_send_request_to_llm, e)
-        if current_sentence:
-            yield current_sentence
+            # 处理结束后，发送剩余内容
+            if current_sentence and not interrupted:  # 只有在未被打断的情况下才发送剩余内容
+                yield current_sentence
+            
+            # 将模型响应添加到上下文历史（无论是否打断都要添加）
+            _llm_context.history.append(AgentResponseTurn(response=full_response, pre_reply=pre_reply))
+
+            # 添加到stateful_agent
+            from app.std.stateful_agent import get_stateful_agent
+            get_stateful_agent().history_states_dialogue.append(AgentResponseTurn(response=full_response))
+            
+        except Exception as e:
+            print_error(simple_send_request_to_llm, e)
+            if current_sentence and not interrupted:  # 异常情况下也需要检查是否被打断
+                yield current_sentence
+    
+    return timer, response_generator(timer)
+
+async def empty_async_generator() -> AsyncGenerator[str, None]:
+    """返回一个空的异步生成器"""
+    if False:  # 永远不会执行，但使类型检查器满意
+        yield ""
 
 
 
