@@ -1,172 +1,61 @@
 <template>
   <div class="audio-playback-container">
-    <!-- 音频播放状态指示器 -->
-    <!-- <div class="audio-playback-status" :class="{ 'active': isPlayingBackendAudio }">
-      后端音频播放状态: {{ isPlayingBackendAudio ? '正在播放' : '未播放' }}
-      <div class="audio-playback-indicator"></div>
-    </div> -->
-
-    <!-- SiriWave 可视化组件和识别结果区域 -->
-    <div class="main-content-row">
-      <div class="siri-wave-container">
-        <SiriWave 
-          :mode="siriWaveMode"
-          :idleIntensity="0.3"
-          :listeningIntensity="currentListeningIntensity"
-          :speakingIntensity="currentSpeakingIntensity"
-        />
+    <TitleBar />
+    <!-- SiriWave 可视化组件 -->
+    <SiriWave 
+      :mode="siriWaveMode"
+      :idleIntensity="0.3"
+      :listeningIntensity="currentListeningIntensity"
+      :speakingIntensity="currentSpeakingIntensity"
+    />
+    
+    <!-- 三点菜单按钮 -->
+    <div class="menu-button" @click="(event) => toggleMenu(event)">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+    
+    <!-- 下拉菜单 -->
+    <div class="dropdown-menu" v-if="showMenu" @click="(event) => event.stopPropagation()">
+      <div class="menu-item" @click="() => { toggleAudioCapture(); toggleMenu(); }">
+        <span class="menu-icon">🎤</span>
+        <span>{{ isVadActive ? '停止识别' : '开始识别' }}</span>
       </div>
-      
-      <div class="stt-results-container" v-if="true">
-        <h4>识别结果</h4>
-        <div class="stt-text" :class="{ 'final': isTextFinal }">
-          {{ recognizedText || '等待语音输入...' }}
-        </div>
-        <!-- <div class="debug-stt-info">
-          <p>语音状态: {{ isSpeaking ? '说话中' : '静音' }}</p>
-          <p>最后更新: {{ new Date().toLocaleTimeString() }}</p>
-        </div> -->
+      <div class="menu-item" @click="(event) => openMicrophoneSelector(event)">
+        <span class="menu-icon">⚙️</span>
+        <span>选择麦克风</span>
       </div>
     </div>
 
-    <!-- VAD 状态指示 -->
-    <!-- <div class="vad-status">
-      <div 
-        class="vad-indicator" 
-        :class="{ 'active': isSpeaking }"
-        :title="isSpeaking ? '检测到语音' : '静音状态'"
-      ></div>
-      <div class="vad-label">{{ statusText }}</div>
-    </div> -->
-
-    <!-- 状态机状态显示 -->
-    <!-- <div class="state-machine-status">
-      <div class="state-indicator">
-        <span class="state-label">状态机状态:</span>
-        <span class="state-value" :class="`state-${currentStateMachineState.toLowerCase()}`">
-          {{ currentStateMachineState }}
-        </span>
-      </div>
-      <div class="silence-info" v-if="silenceDuration > 0">
-        <span>静音时长: {{ silenceDuration }}ms</span>
-      </div>
-    </div> -->
-
-    <!-- SiriWave状态和音频音量显示 -->
-    <!-- <div class="audio-status-panel">
-      <div class="status-item">
-        <span class="status-label">SiriWave状态:</span>
-        <span class="status-value" :class="`siri-${siriWaveMode}`">
-          {{ siriWaveMode }}
-        </span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">音频音量:</span>
-        <div class="volume-meter">
-          <div class="volume-bar" :style="{width: `${currentAudioVolume * 100}%`}"></div>
-          <span class="volume-text">{{ (currentAudioVolume * 100).toFixed(1) }}%</span>
+    <!-- 麦克风选择器对话框 -->
+    <div class="dialog-overlay" v-if="showMicSelector">
+      <div class="dialog-content mic-selector-dialog">
+        <div class="dialog-header">
+          <h4>选择麦克风</h4>
+          <span class="close-icon" @click="showMicSelector = false">×</span>
+        </div>
+        <div class="microphone-selector">
+          <select 
+            id="microphone-select" 
+            v-model="selectedMicrophoneId"
+            :disabled="isVadActive || isSimulatedMicActive"
+          >
+            <option v-for="mic in availableMicrophones" :key="mic.deviceId" :value="mic.deviceId">
+              {{ mic.label }} {{ mic.isDefault ? '(默认)' : '' }}
+            </option>
+          </select>
+        </div>
+        <div class="dialog-buttons">
+          <button class="refresh-button" @click="refreshMicrophoneList" :disabled="isVadActive || isSimulatedMicActive">
+            <span class="refresh-icon">↻</span> 刷新
+          </button>
+          <div class="action-buttons">
+            <button class="cancel-button" @click="showMicSelector = false">取消</button>
+            <button class="confirm-button" @click="confirmMicrophoneChange">确定</button>
+          </div>
         </div>
       </div>
-    </div> -->
-
-    <!-- 控制按钮 -->
-    <div class="controls">
-      <button @click="() => toggleAudioCapture()" :class="{ active: isVadActive }">
-        {{ isVadActive ? '停止识别' : '开始识别' }}
-      </button>
-      <button v-if="isVadActive" @click="resetVadSession" class="reset-button">
-        重置会话
-      </button>
-      <button 
-        v-if="!isVadActive && (capturedSegmentsCount > 0 || hasGlobalRecording)"
-        @click="showPlaybackDialog = true"
-      >
-        播放识别语音
-      </button>
-      <!-- <button @click="simulateSttResult" class="debug-button">
-        模拟STT结果
-      </button> -->
-    </div>
-
-    <!-- 麦克风选择器 -->
-    <div class="microphone-selector">
-      <label for="microphone-select">选择麦克风：</label>
-      <select 
-        id="microphone-select" 
-        v-model="selectedMicrophoneId"
-        @change="onMicrophoneChange"
-        :disabled="isVadActive || isSimulatedMicActive"
-      >
-        <option v-for="mic in availableMicrophones" :key="mic.deviceId" :value="mic.deviceId">
-          {{ mic.label }} {{ mic.isDefault ? '(默认)' : '' }}
-        </option>
-      </select>
-      <button class="refresh-button" @click="refreshMicrophoneList" :disabled="isVadActive || isSimulatedMicActive">
-        刷新
-      </button>
-    </div>
-
-    <!-- 模拟麦克风控制 -->
-    <!-- <div class="simulated-mic-controls">
-      <div class="sim-mic-header">
-        <h4>模拟麦克风</h4>
-        <span class="sim-mic-status" :class="{ 'active': isSimulatedMicActive }">
-          {{ isSimulatedMicActive ? '已启用' : '未启用' }}
-        </span>
-      </div>
-      
-      <div class="sim-mic-actions">
-        <button 
-          @click="toggleSimulatedMic" 
-          :class="{ 'active': isSimulatedMicActive }"
-          :disabled="isVadActive && !isSimulatedMicActive"
-        >
-          {{ isSimulatedMicActive ? '停用模拟麦克风' : '启用模拟麦克风' }}
-        </button>
-
-        <button 
-          v-if="!hasRecordedAudio" 
-          @click="startRecordingSimAudio" 
-          :disabled="isRecordingSimAudio || isVadActive || isSimulatedMicActive"
-          :class="{ 'recording': isRecordingSimAudio }"
-        >
-          {{ isRecordingSimAudio ? '正在录制...' : '录制新的模拟音频' }}
-        </button>
-        
-        <button 
-          v-if="isRecordingSimAudio" 
-          @click="stopRecordingSimAudio"
-        >
-          停止录制
-        </button>
-        
-        <button 
-          v-if="hasRecordedAudio && !isRecordingSimAudio" 
-          @click="playRecordedSimAudio"
-          :disabled="isSimulatedMicActive"
-        >
-          预览录制音频
-        </button>
-        
-        <button 
-          v-if="hasRecordedAudio && !isRecordingSimAudio" 
-          @click="deleteRecordedSimAudio"
-          :disabled="isSimulatedMicActive"
-        >
-          删除录制音频
-        </button>
-      </div>
-    </div> -->
-
-    <!-- 历史记录 -->
-    <div class="history-section" v-if="textHistory.length > 0">
-      <h4>历史记录</h4>
-      <div class="history-list">
-        <div v-for="(item, index) in textHistory" :key="index" class="history-item">
-          <p>{{ item }}</p>
-        </div>
-      </div>
-      <button class="clear-history" @click="clearHistory">清空历史</button>
     </div>
 
     <!-- 播放对话框 -->
@@ -197,16 +86,29 @@
       </div>
     </div>
 
-    <!-- 调试信息 -->
-    <!-- <div v-if="debug" class="debug-info">
-      <p>VAD状态: {{ isVadActive ? '运行中' : '已停止' }}</p>
-      <p>正在说话: {{ isSpeaking ? '是' : '否' }}</p>
-      <p>当前麦克风: {{ getCurrentMicrophoneName() }}</p>
-    </div> -->
+    <!-- 历史记录弹窗 -->
+    <div class="dialog-overlay" v-if="showHistory">
+      <div class="dialog-content">
+        <div class="dialog-header">
+          <h4>历史记录</h4>
+          <span class="close-icon" @click="showHistory = false">×</span>
+        </div>
+        <div class="history-list">
+          <div v-for="(item, index) in textHistory" :key="index" class="history-item">
+            <p>{{ item }}</p>
+          </div>
+        </div>
+        <div class="dialog-buttons">
+          <button class="clear-history" @click="clearHistory">清空历史</button>
+          <button class="cancel-button" @click="showHistory = false">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import TitleBar from "./TitleBar.vue";
 import { ref, onUnmounted, onMounted, getCurrentInstance, watch } from 'vue';
 import { tauriApi } from '../services/tauriApi';
 import { AudioCaptureInterface, MicrophoneDevice, VadEventType } from '../types/audio-processor';
@@ -247,6 +149,12 @@ const showPlaybackDialog = ref(false);
 const capturedSegmentsCount = ref(0);
 const hasGlobalRecording = ref(false);
 
+// --- UI状态 ---
+const showMenu = ref(false);
+const showMicSelector = ref(false);
+const showResults = ref(false);
+const showHistory = ref(false);
+
 // --- 其他 ---
 const debug = ref(false); // 调试模式开关
 const errorLog = ref<string[]>([]);
@@ -263,6 +171,50 @@ const simulatedAudioSourceNode = ref<AudioBufferSourceNode | null>(null);
 const simulatedAudioDestination = ref<MediaStreamAudioDestinationNode | null>(null);
 const simulatedMicStream = ref<MediaStream | null>(null);
 
+// --- 菜单和UI控制 ---
+function toggleMenu(event?: Event) {
+  if (event) {
+    event.stopPropagation(); // 阻止事件冒泡
+  }
+  showMenu.value = !showMenu.value;
+}
+
+function openMicrophoneSelector(event?: Event) {
+  if (event) {
+    event.stopPropagation(); // 阻止事件冒泡
+  }
+  showMenu.value = false;
+  showMicSelector.value = true;
+}
+
+function confirmMicrophoneChange() {
+  onMicrophoneChange();
+  showMicSelector.value = false;
+}
+
+// 点击结果显示/隐藏
+function toggleResults() {
+  showResults.value = !showResults.value;
+}
+
+// 显示历史记录
+function showHistoryDialog() {
+  showMenu.value = false;
+  showHistory.value = true;
+}
+
+// 点击其他地方关闭菜单
+function closeMenuOnClickOutside(event: MouseEvent) {
+  const menuButton = document.querySelector('.menu-button');
+  const dropdown = document.querySelector('.dropdown-menu');
+  
+  if (menuButton && dropdown && 
+      !menuButton.contains(event.target as Node) && 
+      !dropdown.contains(event.target as Node)) {
+    showMenu.value = false;
+  }
+}
+
 // --- 事件监听器 ---
 
 // VAD 事件
@@ -277,6 +229,7 @@ function handleVadEvent(event: CustomEvent) {
     silenceDuration.value = 0;
     speechStartTime.value = Date.now();
     console.log("[AudioPlayback] 检测到语音开始");
+    showResults.value = true; // 显示结果面板
   } else if (vadEvent === 'SpeechEnd' || vadEvent === VadEventType.SpeechEnd) {
     isSpeaking.value = false;
     // 移除手动设置状态，由后端状态机控制
@@ -628,6 +581,8 @@ onMounted(async () => {
   window.addEventListener('audio-playback-started', backendAudioStartHandler as EventListener);
   window.addEventListener('audio-playback-ended', backendAudioEndHandler as EventListener);
   window.addEventListener('backend-audio-features', backendAudioFeaturesHandler as EventListener);
+  // 添加全局点击事件，用于关闭菜单
+  document.addEventListener('click', closeMenuOnClickOutside);
   
   // 尝试从本地存储加载模拟音频
   try {
@@ -665,6 +620,8 @@ onUnmounted(() => {
   window.removeEventListener('audio-playback-started', backendAudioStartHandler as EventListener);
   window.removeEventListener('audio-playback-ended', backendAudioEndHandler as EventListener);
   window.removeEventListener('backend-audio-features', backendAudioFeaturesHandler as EventListener);
+  // 移除全局点击事件
+  document.removeEventListener('click', closeMenuOnClickOutside);
   
   if (hasAudioControl.value) {
     audioCapture.releaseAudioControl(COMPONENT_NAME);
@@ -1205,251 +1162,79 @@ function simulateSttResult() {
 
 <style scoped>
 .audio-playback-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 15px;
-  width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 20px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-/* 主内容行布局 - 新增 */
-.main-content-row {
-  display: flex;
-  width: 100%;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-/* 音频播放状态指示器样式 */
-.audio-playback-status {
-  width: 100%;
-  padding: 10px 15px;
-  background-color: #f0f0f0;
-  border-radius: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: bold;
-  margin-bottom: 10px;
-  transition: all 0.3s ease;
-}
-
-.audio-playback-status.active {
-  background-color: #4caf50;
-  color: white;
-  animation: pulse-green 2s infinite;
-}
-
-.audio-playback-indicator {
-  width: 20px;
-  height: 20px;
+/* 三点菜单按钮 */
+.menu-button {
+  position: absolute;
+  top: 40px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background-color: #ccc;
-}
-
-.audio-playback-status.active .audio-playback-indicator {
-  background-color: #fff;
-  box-shadow: 0 0 10px rgba(255,255,255,0.8);
-}
-
-@keyframes pulse-green {
-  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
-}
-
-.siri-wave-container {
-  width: 50%;
-  height: 200px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 15px;
-  overflow: hidden;
-  position: relative;
-}
-
-/* 语音识别结果容器 - 新增 */
-.stt-results-container {
-  width: 50%;
-  height: 200px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 15px;
-  padding: 15px;
+  background-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-.stt-results-container h4 {
-  margin-top: 0;
-  margin-bottom: 10px;
-  color: #333;
-}
-
-.stt-text {
-  flex-grow: 1;
-  padding: 10px;
-  background-color: rgba(255, 255, 255, 0.7);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  overflow-y: auto;
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-.stt-text.final {
-  background-color: #e8f5e9;
-  font-weight: 500;
-}
-
-/* 调试信息区域 - 新增 */
-.debug-stt-info {
-  font-size: 12px;
-  color: #666;
-  background-color: rgba(255, 255, 255, 0.5);
-  padding: 5px 10px;
-  border-radius: 5px;
-}
-
-.debug-stt-info p {
-  margin: 3px 0;
-}
-
-.controls {
-  display: flex;
-  gap: 10px;
   justify-content: center;
-  width: 100%;
-}
-
-button {
-  padding: 10px 15px;
-  border: none;
-  border-radius: 5px;
-  color: white;
+  align-items: center;
+  gap: 4px;
   cursor: pointer;
-  transition: background-color 0.3s;
-  background-color: #2196f3; /* 统一蓝色系 */
+  z-index: 10;
+  pointer-events: auto;
 }
 
-button:hover:not(:disabled) {
-  background-color: #0b7dda;
+.menu-button:hover {
+  background-color: rgba(255, 255, 255, 1);
 }
 
-button.active {
-  background-color: #f44336; /* 激活/停止按钮红色 */
-}
-
-button.active:hover {
-  background-color: #d32f2f;
-}
-
-button.reset-button {
-  background-color: #ff9800; /* 重置按钮橙色 */
-}
-
-button.reset-button:hover {
-  background-color: #f57c00;
-}
-
-button.debug-button {
-  background-color: #9c27b0; /* 紫色 */
-}
-
-button.debug-button:hover {
-  background-color: #7b1fa2;
-}
-
-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
-}
-
-.microphone-selector {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
-.microphone-selector select {
-  flex-grow: 1;
-  padding: 8px;
-  border-radius: 5px;
-  border: 1px solid #ccc;
-}
-
-.refresh-button {
-  padding: 8px;
-  background-color: #3498db;
-  border-radius: 5px;
-}
-
-.vad-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-}
-
-.vad-indicator {
-  width: 30px;
-  height: 30px;
+.dot {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background-color: #ddd;
-  transition: all 0.3s ease;
+  background-color: #333;
 }
 
-.vad-indicator.active {
-  background-color: #4caf50;
-  box-shadow: 0 0 15px rgba(76, 175, 80, 0.7);
-  animation: pulse 1.5s infinite;
-}
-
-.vad-label {
-  font-size: 18px;
-  font-weight: 500;
-}
-
-.state-machine-status {
-  margin: 10px 0;
-  padding: 10px;
-  background-color: #f0f0f0;
-  border-radius: 6px;
-  text-align: center;
-  width: 100%;
-}
-
-.state-indicator { margin-bottom: 8px; }
-.state-label { font-weight: 500; color: #666; margin-right: 8px; }
-.state-value { font-weight: bold; padding: 4px 8px; border-radius: 4px; font-size: 14px; }
-.state-value.state-initial { background-color: #e3f2fd; color: #1976d2; }
-.state-value.state-speaking { background-color: #e8f5e9; color: #388e3c; }
-.state-value.state-waiting { background-color: #fff3e0; color: #f57c00; }
-.silence-info { font-size: 12px; color: #777; }
-
-.stt-results, .history-section {
-  width: 100%;
-  margin: 10px 0;
-  padding: 15px;
-  background-color: #fff;
+/* 下拉菜单 */
+.dropdown-menu {
+  position: absolute;
+  top: 85px;
+  right: 20px;
+  width: 160px;
+  background-color: white;
   border-radius: 8px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  overflow: hidden;
+  pointer-events: auto;
 }
 
-.history-list {
-  max-height: 150px;
-  overflow-y: auto;
+.menu-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s;
 }
-.history-item {
-  padding: 8px;
-  margin-bottom: 5px;
+
+.menu-item:hover {
   background-color: #f5f5f5;
-  border-radius: 4px;
 }
 
+.menu-icon {
+  margin-right: 10px;
+  font-size: 16px;
+}
+
+/* 对话框样式 */
 .dialog-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1458,158 +1243,204 @@ button:disabled {
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  pointer-events: auto;
+  padding-top: 50px; /* 添加顶部内边距，使对话框整体下移 */
 }
 
 .dialog-content {
   background-color: white;
   padding: 20px;
-  border-radius: 8px;
+  border-radius: 12px;
   width: 90%;
   max-width: 400px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.dialog-header h4 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.close-icon {
+  font-size: 24px;
+  color: #666;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.close-icon:hover {
+  color: #333;
+}
+
+.mic-selector-dialog {
+  max-width: 350px;
+}
+
+.microphone-selector {
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.microphone-selector select {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background-color: #f8f8f8;
+  font-size: 14px;
+  color: #333;
+  outline: none;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.microphone-selector select:hover:not(:disabled) {
+  border-color: #bbb;
+}
+
+.microphone-selector select:focus {
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+.microphone-selector select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #eee;
 }
 
 .dialog-buttons {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
+  flex-direction: column;
+  gap: 15px;
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
-}
-
-.simulated-mic-controls {
-  width: 100%;
-  margin: 10px 0;
-  padding: 15px;
+.refresh-button {
+  padding: 5px 10px;
   background-color: #f0f0f0;
-  border-radius: 8px;
-}
-
-.sim-mic-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.sim-mic-status {
-  font-weight: 500;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.sim-mic-status.active {
-  background-color: #e8f5e9;
-  color: #388e3c;
-}
-
-.sim-mic-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-@media (max-width: 500px) {
-  .sim-mic-actions {
-    flex-direction: column;
-  }
-}
-
-.sim-mic-actions button {
-  padding: 8px 15px;
+  color: #333;
   border: none;
-  border-radius: 5px;
-  color: white;
+  border-radius: 4px;
   cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background-color 0.3s;
+  width: 100%;
 }
 
-.sim-mic-actions button:hover:not(:disabled) {
-  background-color: #0b7dda;
+.refresh-button:hover:not(:disabled) {
+  background-color: #e3e3e3;
 }
 
-.sim-mic-actions button.active {
-  background-color: #f44336;
-}
-
-.sim-mic-actions button.active:hover {
-  background-color: #d32f2f;
-}
-
-.sim-mic-actions button:disabled {
-  background-color: #cccccc;
+.refresh-button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.sim-mic-actions button.recording {
-  background-color: #ff9800;
+.refresh-icon {
+  margin-right: 8px;
+  font-size: 16px;
 }
 
-.sim-mic-actions button.recording:hover {
-  background-color: #f57c00;
-}
-
-.audio-status-panel {
+.action-buttons {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  margin-bottom: 10px;
+  gap: 10px;
 }
 
-.status-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.status-label {
+button {
+  padding: 10px 15px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s;
   font-weight: 500;
-  color: #666;
-  margin-bottom: 5px;
+  flex: 1;
 }
 
-.status-value {
-  font-weight: bold;
-  padding: 4px 8px;
-  border-radius: 4px;
+.cancel-button {
+  background-color: #f0f0f0;
+  color: #333;
 }
 
-.volume-meter {
-  width: 100px;
-  height: 10px;
-  background-color: #ddd;
-  border-radius: 5px;
-  overflow: hidden;
+.cancel-button:hover {
+  background-color: #e3e3e3;
 }
 
-.volume-bar {
-  height: 100%;
-  background-color: #4caf50;
-}
-
-.volume-text {
-  font-size: 12px;
-  color: #666;
-}
-
-.siri-idle {
-  background-color: #607d8b;
-  color: white;
-}
-
-.siri-listening {
+.confirm-button, .play-button {
   background-color: #2196f3;
   color: white;
 }
 
-.siri-speaking {
+.confirm-button:hover {
+  background-color: #1976d2;
+}
+
+.play-combined-button {
   background-color: #4caf50;
   color: white;
+}
+
+.play-combined-button:hover {
+  background-color: #43a047;
+}
+
+button:hover:not(:disabled) {
+  opacity: 0.95;
+}
+
+button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* 历史记录样式 */
+.history-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.history-item {
+  padding: 10px;
+  margin-bottom: 8px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+}
+
+.history-item p {
+  margin: 0;
+}
+
+.clear-history {
+  background-color: #ff9800;
+  color: white;
+}
+</style>
+
+<style>
+/* 全局样式覆盖，去掉滚动条 */
+body {
+  overflow: hidden !important;
+  margin: 0;
+  padding: 0;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 </style> 

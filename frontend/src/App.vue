@@ -23,9 +23,8 @@ async function greet() {
       <SystemAudioRecorder />
     </div> -->
 
-    <div class="feature-section">
-      <AudioPlayback />
-    </div>
+
+    <AudioPlayback />
 
 
     <ScreenshotManager />
@@ -47,7 +46,7 @@ async function greet() {
 .feature-section {
   margin: 20px 0;
   padding: 20px;
-  background-color: #f9f9f9;
+  background-color: transparent;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
@@ -75,7 +74,7 @@ async function greet() {
   position: relative;
   border-radius: 12px;
   overflow: hidden;
-  background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+  background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
@@ -100,7 +99,7 @@ async function greet() {
   font-weight: 400;
 
   color: #0f0f0f;
-  background-color: #f6f6f6;
+  background-color: transparent;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -116,6 +115,7 @@ async function greet() {
   flex-direction: column;
   justify-content: center;
   text-align: center;
+  background-color: transparent;
 }
 
 .logo {
@@ -157,7 +157,7 @@ button {
   font-weight: 500;
   font-family: inherit;
   color: #0f0f0f;
-  background-color: #ffffff;
+  background-color: transparent;
   transition: border-color 0.25s;
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
@@ -171,7 +171,7 @@ button:hover {
 }
 button:active {
   border-color: #396cd8;
-  background-color: #e8e8e8;
+  background-color: transparent;
 }
 
 input,
@@ -186,11 +186,11 @@ button {
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
-    background-color: #2f2f2f;
+    background-color: transparent;
   }
 
   .feature-section {
-    background-color: #3a3a3a;
+    background-color: transparent;
   }
 
   a:hover {
@@ -200,10 +200,10 @@ button {
   input,
   button {
     color: #ffffff;
-    background-color: #0f0f0f98;
+    background-color: transparent;
   }
   button:active {
-    background-color: #0f0f0f69;
+    background-color: transparent;
   }
 }
 </style>

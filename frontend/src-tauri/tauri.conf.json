@@ -14,9 +14,11 @@
       {
         "decorations": false,
         "shadow": false,
+        "resizable": false,
         "title": "Lumina",
-        "width": 800,
-        "height": 600
+        "transparent": true,
+        "width": 225,
+        "height": 250
       }
     ],
     "security": {
