@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AudioPlayback from "./components/AudioPlayback.vue";
 import SystemAudioRecorder from "./components/SystemAudioRecorder.vue";
+import FileUpload from "./components/FileUpload.vue";
 import ScreenshotManager from "./components/ScreenshotManager.vue";
 import TitleBar from "./components/TitleBar.vue";
 
@@ -19,6 +20,11 @@ async function greet() {
   <TitleBar />
   <main class="container">
 
+
+
+    <div class="feature-section">
+      <FileUpload />
+    </div>
     <!-- <div class="feature-section">
       <SystemAudioRecorder />
     </div> -->
