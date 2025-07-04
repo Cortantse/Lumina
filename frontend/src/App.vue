@@ -22,9 +22,9 @@ async function greet() {
 
 
 
-    <div class="feature-section">
+    <!-- <div class="feature-section">
       <FileUpload />
-    </div>
+    </div> -->
     <!-- <div class="feature-section">
       <SystemAudioRecorder />
     </div> -->
