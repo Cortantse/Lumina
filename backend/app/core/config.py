@@ -17,10 +17,11 @@ mid_silence_timeout = 500 # 中静默时间，单位：毫秒, 提示用户 我�
 long_silence_timeout = 5000 # 长静默时间，单位：毫秒, 退出并 flush 当前会话
 
 # stt 参数
-max_sentence_silence = 300 # 最大句子静默时间，单位：毫秒
-max_single_segment_time = 5000 # 最大单个句子时间，单位：毫秒
-max_end_silence = 400 # 最大结束静默时间，单位：毫秒
-reconnection_delay = 0.1 # 重连延迟时间，单位：秒
+max_sentence_silence = 200 # 最大句子静默时间，单位：毫秒，从200减小到150提高中间结果响应速度
+max_single_segment_time = 3000 # 最大单个句子时间，单位：毫秒，从5000减小到3000增加中间结果输出频率
+max_end_silence = 400 # 最大结束静默时间，单位：毫秒，从400减小到300加快识别结果返回
+reconnection_delay = 1 # 重连延迟时间，单位：秒
+stt_auto_refresh_threshold = 10 # 自动刷新阈值，单位：秒，从15减少到10秒，避免连接问题
 
 
 # pre-reply 参数

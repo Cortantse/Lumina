@@ -225,7 +225,7 @@ const shader = {
       // 推荐范围：0.05~0.2
       // 数值越大，表面明暗变化越明显，细节越丰富
       // 当前设置：0.1，适中的噪声细节
-      // 把 0.14 ↓ 到 0.08，保留细节但弱化“颗粒”感
+      // 把 0.14 ↓ 到 0.08，保留细节但弱化"颗粒"感
       baseColor += baseColor * v_noise * 0.08;
 
 
@@ -451,7 +451,7 @@ onLoop(({ elapsed }: { elapsed: number }) => {
    * 当前设置：
    * - idle: 0.9 (较小，体现内敛、安静)
    * - listening: 1.0 (标准大小，体现专注、接收)
-   * - speaking: 1.15 (较大，体现活跃、表达)
+   * - speaking: 1.2 (较大，体现活跃、表达)
    */
   const STATE_BASE_SCALES = {
     idle: 0.9,       // 空闲状态：较小，内敛
@@ -523,7 +523,7 @@ onLoop(({ elapsed }: { elapsed: number }) => {
 </script>
 
 <template>
-  <div ref="canvasRef">
+  <div ref="canvasRef" data-tauri-drag-region>
     <TresCanvas 
       class="siri-canvas"
       window-size 
@@ -579,7 +579,7 @@ onLoop(({ elapsed }: { elapsed: number }) => {
   position: fixed !important;
   left: 0;
   top: 0;
-  pointer-events: none; /* 允许通过点击 */
+  pointer-events: auto; /* 允许通过点击和拖拽 */
   z-index: -1; /* 置于所有内容后面 */
   background-color: transparent;
 }

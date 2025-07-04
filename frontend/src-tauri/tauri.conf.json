@@ -18,7 +18,8 @@
         "title": "Lumina",
         "transparent": true,
         "width": 225,
-        "height": 250
+        "height": 250,
+        "alwaysOnTop": true
       }
     ],
     "security": {

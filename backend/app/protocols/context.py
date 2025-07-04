@@ -75,16 +75,10 @@ class ToBeProcessedTurns:
                 start_time = time.time()
                 # 每 15ms 自动增长，除非被设置变量提示(STT设置提示)
                 while self.silence_duration_auto_increase:
-                    await asyncio.sleep(0.015)
+                    await asyncio.sleep(0.003)
                     current_time = time.time()
                     elapsed_ms = int((current_time - start_time) * 1000)
-                    self.silence_duration = (silence_duration + elapsed_ms, self.silence_duration[1])
-
-                    # [TODO] 在这里处理 短、中、长超时的情况，相当于静音事件驱动
-                    if self.silence_duration[0] > config.mid_silence_timeout:
-                        # 中静默时间超时，提示用户我在听
-                        pipeline = cast(PipelineService, global_vars.pipeline_service)
-                        # asyncio.create_task(pipeline.send_listening_template())
+                    self.silence_duration = (elapsed_ms, self.silence_duration[1])
 
                 # 记录打断时间
                 try:
@@ -154,10 +148,6 @@ async def is_ended_by_std(to_be_processed_turns: ToBeProcessedTurns, llm_context
     return timer, pre_reply_result
 
     
-    
-
-  
-# --- 接口：记忆模块自动添加高度相关记忆 --- #
 async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) -> None:
     """
     根据当前回合的文本和图像描述，从记忆库中检索相关记忆，
@@ -166,7 +156,6 @@ async def add_retrieved_memories_to_context(to_be_processed_turn: ExpandedTurn) 
     此函数会并发执行所有查询，并对结果进行去重。
     """
     try:
-
         # 1. 准备查询列表
         queries = [to_be_processed_turn.transcript]
         if to_be_processed_turn.image_inputs:
@@ -372,29 +361,7 @@ async def instruction_recognition(to_be_processed_turns: ToBeProcessedTurns, llm
 
 
     try:
-
-
-        # 获取最后一轮未被处理的信息
-        to_be_processed_turn = to_be_processed_turns.all_transcripts_in_current_turn[-1]
-        # print(f"【调试】进行指令识别，当前转录文本: {to_be_processed_turn.transcript}")
-        
-        # 获取待处理转录文本
-        transcript = to_be_processed_turn.transcript
-        
-        # 创建任务但现在不等待
-        instruction_searched_memories_task = asyncio.create_task(
-            add_retrieved_memories_to_context_by_instruction(to_be_processed_turn, llm_context)
-        )
-        new_system_context = asyncio.create_task(
-            get_global_status(llm_context.system_context, to_be_processed_turns)
-        )
-
-        # 一起等待两者
-        results = await asyncio.gather(instruction_searched_memories_task, new_system_context)
-
-        # 这里直接加入记忆和替换系统状态
-        to_be_processed_turn.retrieved_memories.extend(results[0])
-        llm_context.system_context = results[1]
+        pass
 
     except Exception as e:
         print_error(instruction_recognition, e)
