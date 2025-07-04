@@ -180,3 +180,42 @@ class PdfFileReader(FileReader):
                     chunk_order += 1
         
         doc.close()
+
+
+async def extract_text_from_pdf(file_path: str, file_binary: Optional[bytes] = None) -> str:
+    """
+    从PDF文件中提取所有文本内容并返回
+    
+    Args:
+        file_path: PDF文件路径
+        file_binary: 可选的文件二进制数据，如果提供则优先使用
+            
+    Returns:
+        提取的文本内容
+    """
+    try:
+        # 打开PDF文件
+        if file_binary:
+            doc = fitz.open(stream=file_binary, filetype="pdf")
+        else:
+            doc = fitz.open(file_path)
+            
+        # 用于存储所有页面的文本
+        all_text = []
+        
+        # 处理每一页
+        for page_num, page in enumerate(doc, start=1):
+            # 提取页面文本
+            page_text = page.get_text("text")
+            # 添加页码标记
+            formatted_text = f"--- 第 {page_num} 页 ---\n{page_text}"
+            all_text.append(formatted_text)
+            
+        # 关闭文档
+        doc.close()
+        
+        # 将所有文本合并
+        return "\n\n".join(all_text)
+        
+    except Exception as e:
+        return f"提取PDF文本时出错: {str(e)}"

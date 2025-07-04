@@ -146,7 +146,7 @@ async def add_retrieved_memories_to_context_by_instruction(to_be_processed_turn:
             else:
                 # 对于其他类型命令，直接执行但不返回记忆
                 await executor_manager.execute_command(command_tools_result)
-    
+    print(f"【调试】add_retrieved_memories_to_context_by_instruction 添加的记忆: {memories}")
     return memories
 
 
@@ -186,6 +186,16 @@ async def get_global_status(current_system_context: SystemContext, to_be_process
         # 更新系统上下文中的情绪和关键内容
         system_context.add("user_emotion", analysis_result["emotion"])
         system_context.add("key_content", analysis_result["key_content"])
+        
+        # 获取所有文件内容并添加到上下文
+        from app.api.v1.files import get_file_content
+        
+        try:
+            file_name, file_content = await get_file_content()
+            system_context.add(f"file_{file_name}", file_content)
+        except Exception as file_error:
+            print(f"获取文件内容失败: {str(file_error)}")
+        
         print(f"【调试】analysis_result: {analysis_result}")
     except Exception as e:
         # 出现错误时不更新情绪和关键内容
