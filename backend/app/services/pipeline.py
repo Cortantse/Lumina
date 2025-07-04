@@ -1,10 +1,10 @@
 # app/services/pipeline.py 将 STT -> STD -> Memory -> LLM -> TTS 串联起来
 
-from typing import Optional, Any, List, Callable, Dict, AsyncGenerator
+import traceback
+from typing import Optional, Any, List, Callable, Dict, AsyncGenerator, cast
 import asyncio
 import time
 import wave
-import torch
 from fastapi import WebSocket
 import queue
 from collections import deque
@@ -15,6 +15,9 @@ from app.protocols.tts import MiniMaxTTSClient, TTSApiEmotion, get_tts_client, T
 from app.tts.send_tts import send_tts_audio_stream
 # 初始化并注册命令检测器
 from app.memory.store import get_memory_manager
+from app.utils.exception import print_error
+from app.verify.main_generation import retrieve_emotion_and_cleaned_sentence_from_text
+from app.std.timer import Timer
 
 
 class PipelineService:
@@ -47,11 +50,11 @@ class PipelineService:
         self.tts_client = None
         self.tts_api_key = tts_api_key
         # self.tts_emotion = TTSApiEmotion.HAPPY  # 默认情绪
-        
+
         # TTS播放控制
         self.tts_playing = False
         self.tts_monitor_task = None
-        self.check_interval = 0.01  # 检查STT缓冲区的间隔时间（秒） # TODO 轮询慢且卡
+        self.check_interval = 0.01  # 检查STT缓冲区的间隔时间（秒） 
         
         # 初始化记忆客户端
         self.memory_client = None
@@ -87,9 +90,9 @@ class PipelineService:
         """异步初始化TTS客户端"""
         if not self.tts_client:
             try:
-                print("【调试】正在获取全局TTS客户端实例")
                 self.tts_client = await get_tts_client(self.tts_api_key)
                 print("【调试】获取TTS客户端成功")
+                asyncio.create_task(self.get_listening_template()) # 获取我在听音频块
             except Exception as e:
                 print(f"【错误】获取TTS客户端失败: {e}")
     
@@ -198,12 +201,12 @@ class PipelineService:
             bool: 启动成功返回True，失败返回False
         """
         try:
-            # print("【调试】正在启动语音识别会话")
+            print("【调试】正在启动语音识别会话")
             result = await self.stt_client.start_session()
-            # if result:
-            #     print("【调试】语音识别会话启动成功")
-            # else:
-            #     print("【警告】语音识别会话启动失败")
+            if result:
+                print("【调试】语音识别会话启动成功")
+            else:
+                print("【警告】语音识别会话启动失败")
             return result
         except Exception as e:
             print(f"【错误】启动STT会话失败: {e}")
@@ -228,6 +231,18 @@ class PipelineService:
         except Exception as e:
             print(f"【错误】结束STT会话失败: {e}")
             return None
+
+
+    def clear_tts_queue(self) -> None:
+        """
+        清空TTS队列，用于在用户打断时清空队列
+        """
+        try:
+            while not self.sentence_queue.empty():
+                self.sentence_queue.get_nowait()
+        except Exception as e:
+            print(f"【错误】清空TTS队列失败: {e}")
+            
     
     async def _process_tts_queue(self) -> None:
         """处理TTS队列中的句子
@@ -239,20 +254,41 @@ class PipelineService:
         # 确保TTS客户端已初始化
         if not self.tts_client:
             await self.init_tts_client()
+
+        current_emotion = TTSApiEmotion.NEUTRAL
+        time_stamp = time.time()
             
         while self.running:
             try:
                 # 从队列中获取一个句子
-                sentence = await self.sentence_queue.get()
-                
-                if sentence:
+                sentence, timer = await self.sentence_queue.get()
+                timer = cast(Timer, timer)
+
+                if sentence and timer.assure_no_interruption(): # 如果用户打断，则对该信息不进行处理
                     # print(f"【调试】[TTS处理器] 处理句子: {sentence}")
-                    
+                    emotion, cleaned_sentence = retrieve_emotion_and_cleaned_sentence_from_text(sentence)
+                    if emotion != current_emotion and emotion is not None and emotion != TTSApiEmotion.NEUTRAL:
+                        # print(f"【调试】[TTS处理器] 从{current_emotion}切换到{emotion}")
+                        current_emotion = emotion
+                        time_stamp = time.time()
+
                     # 获取音频流并发送到前端
-                    audio_stream = self.tts_client.send_tts_request(None, sentence)
-                    await send_tts_audio_stream(audio_stream)
+                    audio_stream = self.tts_client.send_tts_request(current_emotion, cleaned_sentence)
+
+                    # 发送音频流前需要确保 timer 已经超时
+                    if_timeout = await timer.wait_for_timeout()
+                    if if_timeout: # 超时，则发送音频流
+                        await send_tts_audio_stream(audio_stream)
                     
                     # 标记任务完成
+                    self.sentence_queue.task_done()
+
+                    # 检查是否超过8秒没有情绪变化
+                    if time.time() - time_stamp > 8 and current_emotion:
+                        current_emotion = None
+                        time_stamp = time.time()
+                else:
+                    print(f"【调试】[TTS处理器] 用户打断，跳过处理句子: {sentence}")
                     self.sentence_queue.task_done()
                 
             except asyncio.CancelledError:
@@ -283,8 +319,7 @@ class PipelineService:
 
                     # 启动异步任务处理LLM响应
                     asyncio.create_task(self._process_llm_response(text))
-                
-                # 等待下一次检查
+
                 await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
@@ -305,9 +340,21 @@ class PipelineService:
         try:
             from app.llm.qwen_client import simple_send_request_to_llm
             
-            # 发送消息到LLM并获取响应生成器
-            llm_response_generator = simple_send_request_to_llm(text)
+            if not text or not text.strip():
+                print(f"【警告】[Pipeline] 收到空文本，跳过LLM处理")
+                return
+                
+            # 发送消息到LLM并获取响应生成器和timer
+            timer, llm_response_generator = await simple_send_request_to_llm(text)
             
+            # 确保生成器不为None
+            if not llm_response_generator or timer is None:
+                print(f"【警告】[Pipeline] LLM响应生成器为None，可能是调用失败")
+                print(f"[调试] 调用堆栈: {traceback.format_exc()}")
+                print(f"[调试] llm_response_generator: {llm_response_generator}")
+                print(f"[调试] timer: {timer}")
+                return
+                
             # 处理每个生成的完整句子
             async for sentence in llm_response_generator:
                 if not sentence:
@@ -316,10 +363,12 @@ class PipelineService:
                 print(f"【调试】[Pipeline] 收到完整句子: {sentence}")
                 
                 # 将句子放入队列，供TTS处理器处理
-                await self.sentence_queue.put(sentence)
+                await self.sentence_queue.put((sentence, timer))
                 
+        except IndexError as e:
+            print(f"【错误】处理LLM响应时出错(索引错误): {e}")
         except Exception as e:
-            print(f"【错误】处理LLM响应时出错: {e}")
+            print_error(self._process_llm_response, e)
     
     async def _run_callback(self, callback: Callable, text: str, is_final: bool) -> None:
         """运行回调函数
@@ -338,3 +387,30 @@ class PipelineService:
             # print("【调试】回调函数执行完成")
         except Exception as e:
             print(f"【错误】运行回调函数失败: {e}")
+
+    async def put_pre_reply_response(self, text: str, timer: Timer):
+        """
+        将预回复内容快速加入到 queue中
+        """
+        await self.sentence_queue.put((text, timer))
+
+    async def get_listening_template(self):
+        """
+        获取我在听音频块
+        """
+        if not self.tts_client:
+            await self.init_tts_client()
+            if not self.tts_client:
+                print("【错误】无法获取TTS客户端，无法生成'我在听'音频")
+                return None
+                
+        audio_stream = self.tts_client.send_tts_request(None, "我在听，请继续说")
+        return audio_stream
+
+    async def send_listening_template(self):
+        """
+        发送我在听音频块
+        """
+        audio_stream = await self.get_listening_template()
+        if audio_stream:
+            await send_tts_audio_stream(audio_stream)

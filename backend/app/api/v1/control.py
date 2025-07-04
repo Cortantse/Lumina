@@ -8,6 +8,7 @@ from typing import Dict, Optional, List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 from app.api.v1.audio import router
+from app.llm.qwen_client import _global_to_be_processed_turns
 
 # 创建路由器
 router = APIRouter()
@@ -18,6 +19,7 @@ class ControlMessageType:
     END_SESSION = 0x02
     RESET_TO_INITIAL = 0x03
     START_SESSION = 0x04
+    INTERRUPT = 0x05
 
 # 控制消息数据模型
 class ControlMessage(BaseModel):
@@ -101,6 +103,8 @@ class ControlMessageHandler:
                 await ControlMessageHandler._handle_reset_to_initial(client, client_id, loop)
             elif msg_type == ControlMessageType.START_SESSION:
                 await ControlMessageHandler._handle_start_session(client, client_id, loop)
+            elif msg_type == ControlMessageType.INTERRUPT:
+                await ControlMessageHandler._handle_interrupt(client, client_id, loop)
             else:
                 print(f"【警告】未知的控制消息类型: 0x{msg_type:02x}，客户端 {client_id}")
                 
@@ -115,17 +119,11 @@ class ControlMessageHandler:
             silence_bytes = await loop.sock_recv(client, 8)
             if len(silence_bytes) == 8:
                 silence_duration = struct.unpack("<Q", silence_bytes)[0]
-                # print(f"【重要】收到静音事件 (客户端 {client_id}): {silence_duration}ms")
                 
-                # 这里可以添加更多的静音事件处理逻辑
-                # 比如记录静音时长、触发特定动作等
+                # 记录静音时长
+                # loop.create_task(_global_to_be_processed_turns.set_silence_duration(silence_duration))
+
                 
-                # 可以通过控制连接管理器通知其他服务
-                # await control_manager.broadcast_control_message({
-                #     "type": "silence_event",
-                #     "client_id": client_id,
-                #     "silence_ms": silence_duration
-                # })
             else:
                 print(f"【警告】静音事件数据不完整，客户端 {client_id}")
         except Exception as e:
@@ -148,6 +146,15 @@ class ControlMessageHandler:
         """处理开始会话事件"""
         print(f"【重要】收到开始会话事件 (客户端 {client_id})")
         # 处理开始会话逻辑
+
+    @staticmethod
+    async def _handle_interrupt(client: socket.socket, client_id: str, loop) -> None:
+        """处理打断事件"""
+        print(f"【重要】收到打断事件 (客户端 {client_id})")
+        # 清空待处理的对话轮次
+        if _global_to_be_processed_turns is not None:
+            _global_to_be_processed_turns.clear()
+            print(f"【重要】已清空待处理对话轮次")
 
 # 全局控制连接管理器实例
 control_manager = ControlConnectionManager()
@@ -173,6 +180,15 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "pong", "timestamp": data.get("timestamp")})
                 elif message_type == "status_request":
                     await websocket.send_json({"type": "status", "status": "connected"})
+                # 处理打断事件
+                elif message_type == "interrupt":
+                    print(f"【重要】收到前端打断事件 (客户端 {client_id})")
+                    # 广播打断事件给其他连接的客户端
+                    await control_manager.broadcast_control_message({
+                        "type": "backend_control",
+                        "action": "interrupt",
+                        "data": {"timestamp": data.get("timestamp")}
+                    })
                     
             except json.JSONDecodeError:
                 print(f"【错误】无效的JSON消息 (客户端 {client_id}): {message}")

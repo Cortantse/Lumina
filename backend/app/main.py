@@ -1,6 +1,15 @@
 # app/main.py 主函数，FastAPI + Websocket 启动入口
 import os
 import asyncio
+
+# --- Start of import path fix ---
+try:
+    from app.utils.clean_file import clean_imports
+    clean_imports()
+except Exception as e:
+    print(f"清理导入语句失败: {e}")
+
+
 from typing import Dict
 
 # 不要动，必须在这一步解密api_keys.json中的密钥到环境变量中
@@ -12,16 +21,19 @@ import app.utils.api_checker
 
 from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.protocols.stt import create_websocket_handler, create_socket_handler
+from app.protocols.screenshot_ws import screenshot_ws_manager
 from app.services.pipeline import PipelineService
 from app.api.v1.audio import router as audio_router
 from app.api.v1.audio import initialize as initialize_audio_api
 from app.api.v1.control import router as control_router
 from app.api.v1.files import router as files_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
+# 全局服务实例
+import app.global_vars as global_vars
 
 # 加载环境变量
 load_dotenv()
@@ -38,10 +50,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 全局服务实例
-pipeline_service = None
-websocket_handler = None
-socket_handler = None
+
+# 添加WebSocket路由
+@app.websocket("/screenshot-ws")
+async def websocket_screenshot_endpoint(websocket: WebSocket):
+    await screenshot_ws_manager.connect(websocket)
+    try:
+        while True:
+            # 接收JSON消息
+            data = await websocket.receive_json()
+            await screenshot_ws_manager.handle_message(websocket, data)
+    except WebSocketDisconnect:
+        screenshot_ws_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket错误: {str(e)}")
+        screenshot_ws_manager.disconnect(websocket)
 
 
 @app.on_event("startup")
@@ -69,21 +92,26 @@ async def startup_event():
     }
     
     # 初始化Pipeline服务
-    pipeline_service = PipelineService(stt_config=stt_config, tts_api_key=tts_api_key)
-    pipeline_service.start()
+    global_vars.pipeline_service = PipelineService(stt_config=stt_config, tts_api_key=tts_api_key)
+    global_vars.pipeline_service.start()
     
     # 初始化API模块
-    initialize_audio_api(pipeline_service)
+    initialize_audio_api(global_vars.pipeline_service)
     
     # 初始化TTS Socket服务器
     await initialize_tts_socket()
     
     # 使用protocols/stt.py中的工厂函数初始化WebSocket处理器
-    websocket_handler = create_websocket_handler(stt_client=pipeline_service.stt_client)
+    global_vars.websocket_handler = create_websocket_handler(stt_client=global_vars.pipeline_service.stt_client)
     
     # 使用protocols/stt.py中的工厂函数初始化Socket处理器
-    socket_handler = create_socket_handler(stt_client=pipeline_service.stt_client)
-    asyncio.create_task(socket_handler.start())
+    global_vars.socket_handler = create_socket_handler(stt_client=global_vars.pipeline_service.stt_client)
+    asyncio.create_task(global_vars.socket_handler.start())
+
+    # 创建定时发送截图请求的任务(测试用)
+    print("启动定时截图请求任务(每10秒一次)")
+    asyncio.create_task(send_screenshot_requests_periodically())
+
 
 
 @app.on_event("shutdown")
@@ -108,6 +136,25 @@ app.include_router(control_router, prefix="/api/v1/control")
 
 # 注册文件上传路由
 app.include_router(files_router, prefix="/api/v1/files")
+
+
+# 定时发送截图请求的异步函数(测试用)
+async def send_screenshot_requests_periodically():
+    """每10秒自动发送一次截图请求"""
+    print("开始定时截图请求任务(每10秒一次)")
+    while True:
+        try:
+            # 请求截图
+            result = await screenshot_ws_manager.request_screenshot()
+            if result["success"]:
+                print(f"定时截图请求已发送，请求ID: {result.get('requestId')}")
+            else:
+                print(f"定时截图请求失败: {result['message']}")
+        except Exception as e:
+            print(f"执行定时截图请求时出错: {str(e)}")
+        
+        # 等待10秒
+        await asyncio.sleep(10)
 
 
 def main():

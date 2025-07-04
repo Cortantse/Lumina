@@ -14,6 +14,7 @@
 -   **对话历史**：按时间顺序排列的对话回合序列（`DialogueTurn`）。   其中对话历史可以分为展开和压缩两种状态。
 -   **系统上下文**：指导LLM行为的全局持久性信息（`SystemContext`）。
 """
+import copy
 from dataclasses import dataclass, field
 import datetime
 import time
@@ -21,6 +22,7 @@ from typing import List, Dict, Optional, Any, Union
 
 from app.protocols.memory import Memory
 from app.models.image import ImageInput
+from app.utils.exception import print_error
 
 
 # --- 对话的原子单元 ---
@@ -39,7 +41,7 @@ class ExpandedTurn:
     retrieved_memories: List[Memory] = field(default_factory=list)
     """从记忆库中检索到的与转录文本相关的Memory对象列表。"""
 
-    timestamp: str = field(default_factory=lambda: time.time())
+    timestamp: float = field(default_factory=lambda: time.time())
 
 
 @dataclass
@@ -58,7 +60,7 @@ class CompressedTurn:
     summary: str
     """此对话回合的精简摘要。拥有摘要的回合被视为"已归档"。"""
 
-    timestamp: str = field(default_factory=lambda: time.time())
+    timestamp: float = field(default_factory=lambda: time.time())
 
 @dataclass
 class AgentResponseTurn:
@@ -68,10 +70,13 @@ class AgentResponseTurn:
     response: str
     """AI助手的回答内容。"""
 
+    pre_reply: str = field(default="")
+    """AI助手的预回复内容。"""
+
     was_interrupted: bool = False
     """标记该回答是否被用户中途打断。"""
 
-    timestamp: str = field(default_factory=lambda: time.time())
+    timestamp: float = field(default_factory=lambda: time.time())
 
 
 
@@ -82,6 +87,11 @@ DialogueTurn = Union[ExpandedTurn, CompressedTurn, AgentResponseTurn, MultipleEx
 # --- 全局上下文 ---
 
 @dataclass
+class TimedItem:
+    value: Any
+    timestamp: float
+
+@dataclass
 class SystemContext:
     """
     以动态、可扩展的方式持有指导LLM行为的全局信息。
@@ -89,26 +99,59 @@ class SystemContext:
     提供一个灵活的字典来存储所有系统级指令，
     调用者可以直接管理这些指令。
     """
-    directives: Dict[str, Any] = field(default_factory=dict)
+    directives: Dict[str, List[TimedItem]] = field(default_factory=dict)
+    max_length: int = 5  # 每个指令最多保留5条历史
     """
-    一个灵活的字典，用于存储所有系统级指令。
+    一个结构化的多项历史指令容器，用于存储所有系统级上下文信息。
+    
+    每个 key 对应一个最多保留 5 条历史的列表，按时间倒序排列（新→旧），
+    用于模拟 LLM 的上下文记忆能力，支持逐步引导、多轮设定等高级功能。
+
     例如:
-    - {'persona': '你是一个专业的金融助手。'}
-    - {'user_preferences': {'language': 'zh', 'response_length': 'short'}}
-    - {'output_format': 'JSON'}
+    - 'persona': [
+        TimedItem("你是一个专业的金融助手。", timestamp),
+        TimedItem("你是一个生活咨询专家。", timestamp)
+      ]
+    
+    - 'user_preferences': [
+        TimedItem({'language': 'zh', 'tone': 'formal'}, timestamp),
+        TimedItem({'language': 'zh', 'response_length': 'short'}, timestamp)
+      ]
+    
+    - 'output_format': [
+        TimedItem("JSON", timestamp)
+      ]
     """
+    def copy(self) -> "SystemContext":
+        """
+        创建一个当前上下文的副本
+        """
+        return SystemContext(
+            directives=self.directives.copy()
+        )
 
     def add(self, key: str, value: Any):
-        """添加或更新一个系统指令。"""
-        self.directives[key] = value
+        """添加或更新指令项，按时间倒序排列，保留最多 max_length 条"""
+        item = TimedItem(value=value, timestamp=time.time())
+        
+        # 特殊处理tts_config，直接替换而不是添加到列表
+        if key == "tts_config" or key == "user_emotion":
+            self.directives[key] = [item]  # 仅保留最新的tts_config
+            return
+            
+        # 常规处理其他指令
+        if key not in self.directives:
+            self.directives[key] = []
+        self.directives[key].insert(0, item)  # 新值放前面
+        if len(self.directives[key]) > self.max_length:
+            self.directives[key] = self.directives[key][:self.max_length]
 
     def format(self) -> str:
-        """将所有指令格式化为单个字符串，以便注入到提示中。"""
+        """格式化为注入 LLM 的提示词，按时间降序输出"""
         if not self.directives:
             return ""
-        
-        formatted_directives = "\\n".join(f"- {key}: {value}" for key, value in self.directives.items())
-        return f"--- 当前时刻的系统状态，请你关注 ---\\n{formatted_directives}\\n--- 对话开始 ---"
+
+        return ""
 
 
 # --- 提供给LLM的最终载荷 ---
@@ -129,50 +172,90 @@ class LLMContext:
 
     system_prompt: str = field(default_factory=lambda: "你是一个**语音**智能助手，你收到的是用户转录后的文本，你输出的内容会被转为音频返回给用户，请根据用户的问题给出简洁、快速但有情感的回答，注意回复能被转语音的内容，表情什么的不能。")
 
-    def format_for_llm(self) -> list[dict[str, str]]:
-        """
-        按时间顺序组织整个上下文，并格式化为单个字符串。
+    pre_reply: str = field(default="")
 
-        - 展开的回合 (`ExpandedTurn`) 会显示详细信息。
-        - 多个展开的回合 (`MultipleExpandedTurns`) 会显示拼接详细信息。
+    def copy(self) -> "LLMContext":
+        """
+        创建一个当前上下文的副本
+        """
+        return LLMContext(
+            history=copy.deepcopy(self.history),
+            system_context=self.system_context.copy(),
+            system_prompt=self.system_prompt
+        )
+
+    def format_for_llm(self, pre_reply: bool = False, if_only_transcript: bool = False) -> list[dict[str, str]]:
+        """
+        按时间顺序组织整个上下文，并格式化为结构化消息列表。
+
+        - 展开的回合 (`ExpandedTurn`) 会显示用户输入的内容。
+        - 多个展开的回合 (`MultipleExpandedTurns`) 会合并多个用户输入。
         - 压缩的回合 (`CompressedTurn`) 只显示摘要。
-        - 回答的回合 (`AgentResponseTurn`) 显示回答内容和是否被用户打断。
+        - 回答的回合 (`AgentResponseTurn`) 显示助手的回答。
         """
         prompts = []
 
-        # 0. 添加系统提示词
+        # 0. 添加系统提示词，增强对消息格式的说明
+        if if_only_transcript:
+            enhanced_system_prompt = self.system_prompt
+        else:
+            enhanced_system_prompt = (
+                "注意：请注意区分用户内容和系统提供上下文，积极响应用户内容，同时利用系统提供上下文来辅助回答。\n\n" 
+                + self.system_prompt
+            )
         prompts.append({
             "role": "system",
-            "content": self.system_prompt
+            "content": enhanced_system_prompt
         })
 
         # 1. 添加对话历史
         for turn in self.history:
             if isinstance(turn, ExpandedTurn):
                 # 处理展开的用户回合
-                user_part = self.translate_expanded_turn(turn)
-                
                 prompts.append({
                     "role": "user",
-                    "content": user_part
+                    "content": self.translate_expanded_turn(turn, if_only_transcript=if_only_transcript)
                 })
             elif isinstance(turn, MultipleExpandedTurns):
                 # 处理多个展开的回合
                 prompts.append({
                     "role": "user",
-                    "content": self.translate_multiple_expanded_turns(turn)
+                    "content": self.translate_multiple_expanded_turns(turn, if_only_transcript=if_only_transcript)
                 })
             elif isinstance(turn, CompressedTurn):
                 # 处理压缩的历史回合
                 prompts.append({
                     "role": "user",
-                    "content": f"[时间: {turn.timestamp}， 此轮记忆已被压缩成摘要: {turn.summary}]"   # [TODO] 后续这里应该允许 agent 主动访问，如果 agent 发现相应内容在这里的话
+                    "content": f"此轮对话摘要: {turn.summary}"
                 })
-            elif isinstance(turn, AgentResponseTurn):
+            elif isinstance(turn, AgentResponseTurn) and not pre_reply and not if_only_transcript:
                 # 处理AI助手的回答回合
+                # 将预回复与回答分开，避免使用调试格式
+                content = turn.response
+                
+                # 如果存在预回复，以独立方式表示
+                if turn.pre_reply:
+                    pre_reply_parts = turn.pre_reply.strip().split("\n", 1)
+                    emotion = pre_reply_parts[0] if len(pre_reply_parts) > 0 else ""
+                    pre_reply_text = pre_reply_parts[1] if len(pre_reply_parts) > 1 else ""
+                    
+                    content = f"{emotion}\n{pre_reply_text} {content}"
+                
                 prompts.append({
                     "role": "assistant",
-                    "content": f"时间: {turn.timestamp}， 回答: {turn.response}"
+                    "content": f"{turn.pre_reply}{turn.response}"
+                })
+            elif isinstance(turn, AgentResponseTurn) and pre_reply:
+                # 预回复只提供历史的预回复情况
+                prompts.append({
+                    "role": "assistant",
+                    "content": turn.pre_reply
+                })
+            elif isinstance(turn, AgentResponseTurn) and if_only_transcript:
+                # 为 std 服务
+                prompts.append({
+                    "role": "assistant",
+                    "content": turn.response
                 })
 
         # 2. 添加系统上下文
@@ -183,27 +266,56 @@ class LLMContext:
 
         return prompts
 
+    def translate_expanded_turn(self, turn: ExpandedTurn, index = None, if_only_transcript = False) -> str:
+        """
+        将展开的回合转换为结构化字符串，移除调试信息
+        """
+        # 直接使用用户的转录文本作为基础内容
+        user_part = f"用户: `{turn.transcript}`"
 
-    def translate_expanded_turn(self, turn: ExpandedTurn) -> str:
-        """
-        将展开的回合转换为字符串
-        """
-        user_part = f"时间: {turn.timestamp}， 用户: {turn.transcript}\n"
+        if if_only_transcript: # 为 std 服务
+            return user_part
+        
+        # 添加图片信息（如果有）
         if turn.image_inputs:
-            user_part += f" 本次转录包含 {len(turn.image_inputs)} 张图片， 描述如下："
-            for index, image_input in enumerate(turn.image_inputs):
-                        # 暂时只添加描述
-                user_part += f" [图片{index}的描述: {image_input.short_description}]"
+            image_descriptions = []
+            for idx, image_input in enumerate(turn.image_inputs):
+                image_descriptions.append(f"图片{idx+1}: {image_input.short_description}")
+            
+            user_part += f"\n\n[用户提供了图片: {', '.join(image_descriptions)}]"
                 
+        # 添加记忆信息（如果有）
         if turn.retrieved_memories:
-                    # 暂时直接显示记忆内容
-            retrieved = "\n".join(f"记忆{index}， 时刻{mem.timestamp}: {mem.original_text}" for index, mem in enumerate(turn.retrieved_memories))
-            user_part += f"\n (本次转录检索到的可能有用的相关历史记忆):\\n{retrieved}"
+            memory_texts = []
+            for mem in turn.retrieved_memories:
+                memory_texts.append(mem.original_text)
+                
+            user_part += f"\n\n[相关记忆: {'; '.join(memory_texts)}]"
+
+        # 处理预回复（仅对最后一轮）
+        if self.pre_reply and (index is None or index == len(self.history) - 1):
+            if not self.pre_reply:
+                print_error(self.translate_expanded_turn, "pre_reply is None, content: " + user_part)
+            else:
+                # 将预回复作为独立的指示添加
+                pre_reply_parts = self.pre_reply.strip().split("\n", 1)
+                emotion = pre_reply_parts[0] if len(pre_reply_parts) > 0 else ""
+                pre_reply_text = pre_reply_parts[1] if len(pre_reply_parts) > 1 else ""
+                
+                user_part += f"\n\n[已向用户播放预回复: {pre_reply_text}]"
+                user_part += f"\n请在回复中考虑这个预回复，避免重复内容，并保持语义连贯。"
+
         return user_part
 
-    def translate_multiple_expanded_turns(self, turns: MultipleExpandedTurns) -> str:
+    def translate_multiple_expanded_turns(self, turns: MultipleExpandedTurns, if_only_transcript: bool = False) -> str:
         """
         将多个展开的回合转换为字符串
         """
-        return "\n".join(self.translate_expanded_turn(turn) for turn in turns.turns)
+        user_parts = []
+        for index, turn in enumerate(turns.turns):
+            user_parts.append(self.translate_expanded_turn(turn, index, if_only_transcript=if_only_transcript))
+        
+        # 只在最后一个用户输入后添加预回复指示
+        combined = "\n---\n".join(user_parts)
+        return combined
         

@@ -172,7 +172,7 @@ class FAISSMemoryStore(RetrievalMixin):
         # Save FAISS index
         try:
             faiss.write_index(self.index, index_path)
-            logger.info(f"Saved FAISS index to {index_path}")
+            # logger.info(f"Saved FAISS index to {index_path}")
         except Exception as e:
             logger.error(f"Failed to save FAISS index: {e}")
         
@@ -183,7 +183,7 @@ class FAISSMemoryStore(RetrievalMixin):
             with open(metadata_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"Saved {len(self.memories)} memory chunks to {metadata_path}")
+            # logger.info(f"Saved {len(self.memories)} memory chunks to {metadata_path}")
         except Exception as e:
             logger.error(f"Failed to save memory metadata: {e}")
 
@@ -448,7 +448,7 @@ class FAISSMemoryStore(RetrievalMixin):
         Args:
             force_reembed: 是否强制重新嵌入所有文本，用于模型变更后
         """
-        logger.info("开始重建FAISS索引...")
+        # logger.info("开始重建FAISS索引...")
         
         new_index = faiss.IndexFlatIP(self.vector_dim)
         
@@ -475,7 +475,7 @@ class FAISSMemoryStore(RetrievalMixin):
             self.index = index_with_ids
             # 确保ID的顺序与文本和嵌入的顺序一致
             self.index_to_id = [mem.vector_id for mem in all_memories_to_rebuild]
-            logger.info(f"{self.index.ntotal} 个向量已成功添加到新索引中。")
+            # logger.info(f"{self.index.ntotal} 个向量已成功添加到新索引中。")
         else:
             print_warning(self.rebuild_index, "没有有效的嵌入可添加到索引中，索引将为空。")
             self.index = faiss.IndexIDMap(new_index) # 确保空索引也是正确的类型
@@ -484,7 +484,7 @@ class FAISSMemoryStore(RetrievalMixin):
         if self.persist_dir:
             self._save_index()
 
-        logger.info("FAISS索引重建完成。")
+        # logger.info("FAISS索引重建完成。")
 
 # Helper function to get or create a memory manager instance
 _default_memory_manager: Optional[FAISSMemoryStore] = None

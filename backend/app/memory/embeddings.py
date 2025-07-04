@@ -166,7 +166,7 @@ class EmbeddingService:
         这是一个调度方法，会根据模型类型调用相应的实现。
         """
         if not self._is_ready:
-            logger.info("等待嵌入模型加载完成...")
+            # logger.info("等待嵌入模型加载完成...")
             self.wait_until_ready()
             
         if not self._model:

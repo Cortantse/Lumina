@@ -92,21 +92,8 @@ class CommandDetector:
             intent = await self.intent_detector.detect_fast_intent(text, self.fast_intent_dict)
             if intent and intent in self.fast_intent_to_command_type:
                 command_type = self.fast_intent_to_command_type[intent]
-                # print(f"【调试】command_type: {command_type}")
                 if command_type != CommandType.NONE:
-                    # print(f"Intent detector found command type: {command_type}")
-                    
-                    # 偏好命令特殊处理：使用大模型总结记忆而不是工具调用
-                    # if command_type == CommandType.PREFERENCE:
-                    #     print(f"【处理偏好命令】检测到偏好相关命令，将使用大模型总结并存储记忆")
-                    #     # 创建基本的命令结果，处理逻辑交给executor执行
-                    #     return CommandResult(
-                    #         command_type=CommandType.PREFERENCE,
-                    #         action="preference_memory",
-                    #         params={"original": text, "source": "user"},
-                    #         confidence=0.9
-                    #     )
-                    
+                  
                     # 其他命令类型，返回基本的命令结果
                     return CommandResult(
                         command_type=command_type,
@@ -121,7 +108,7 @@ class CommandDetector:
         # 如果没有检测到命令，返回NONE类型
         return CommandResult(CommandType.NONE)
     
-    async def detect_command_with_tools(self, text: str) -> Optional[CommandResult]:
+    async def detect_tool_call(self, text: str) -> Optional[CommandResult]:
         """
         使用工具调用进行详细的命令检测
         
@@ -132,11 +119,18 @@ class CommandDetector:
             命令结果对象或None
         """
         try:
-            # 使用意图检测器检测工具调用
-            result = await self.intent_detector.detect_intent_and_tool_call(text, self.command_tools)
+            # 否则，将text视为文本，使用意图检测器检测工具调用
+            result = await self.intent_detector.detect_tool_call_only(text, self.command_tools)
+            print(f"【调试】[CommandDetector] 检测到工具调用: {result}")
             
-            # 检查返回结果中是否包含工具调用
-            if result and result.get("tool_call"):
+            # 检查结果格式，处理直接返回工具调用对象的情况
+            if result and isinstance(result, dict) and "name" in result and "arguments" in result:
+                # 直接处理工具调用对象
+                command_result = self._create_command_result_from_tool(result)
+                if command_result:
+                    return command_result
+            # 检查返回结果中是否包含工具调用(兼容旧格式)
+            elif result and result.get("tool_call"):
                 tool_calls = result["tool_call"]
                 
                 # 如果只有一个工具调用
@@ -176,7 +170,10 @@ class CommandDetector:
             命令结果对象或None
         """
         try:
+            # 获取工具名称
             tool_name = tool.get("name", "")
+            
+            # 获取参数，支持两种可能的格式
             arguments = tool.get("arguments", {})
             
             # 根据工具名称确定命令类型
@@ -189,10 +186,11 @@ class CommandDetector:
                 command_type = CommandType.PREFERENCE
             
             if command_type:
+                # 直接从arguments获取action和params
                 action = arguments.get("action", "")
                 params = arguments.get("params", {})
                 
-                # 创建命令结果并返回，参数验证和处理逻辑应该移动到executor中
+                # 创建命令结果并返回
                 return CommandResult(
                     command_type=command_type,
                     action=action,

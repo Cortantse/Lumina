@@ -2,7 +2,7 @@ import asyncio
 import sys
 import io
 import wave
-from typing import AsyncGenerator, Union, Any
+from typing import AsyncGenerator, Union, Any, AsyncIterator
 
 from app.services.socket import UnifiedSocket
 from app.protocols.tts import TTSResponse
