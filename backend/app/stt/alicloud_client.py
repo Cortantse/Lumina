@@ -143,7 +143,7 @@ class AliCloudSTTAdapter(STTClient):
         self.reconnect_lock = asyncio.Lock()  # 重连锁，防止并发重连
 
         # ----- 主動刷新（提前重連）配置 -----
-        self.auto_refresh_threshold = getattr(config, "stt_auto_refresh_threshold", 15)  # 秒
+        self.auto_refresh_threshold = getattr(config, "stt_auto_refresh_threshold", 10)  # 秒，使用配置中的值，默认10秒
         self.idle_check_interval = 1.0  # 秒
         self.monitor_task: Optional[asyncio.Task] = None
         self._refreshing = False  # 標記正在進行主動刷新
@@ -204,7 +204,7 @@ class AliCloudSTTAdapter(STTClient):
                     enable_inverse_text_normalization=False,  # 启用中文数字转阿拉伯数字
                     ex={
                         "disfluency": True,
-                        # "enable_semantic_sentence_detection": True,  # 启用语义断句，更智能的句子边界检测
+                        "enable_semantic_sentence_detection": False,  # 启用语义断句，更智能的句子边界检测
                         # 语音断句检测阈值，静音时长超过该阈值会被认为断句
                         # 范围：200-6000ms，默认800ms
                         # 注意：启用语义断句后此参数无效
@@ -216,7 +216,7 @@ class AliCloudSTTAdapter(STTClient):
                         
                         # 允许的最大结束静音，取值范围：200-6000ms，默认800ms
                         # 控制句子结束时的静音检测敏感度
-                        # "max_end_silence": config.max_end_silence
+                        "max_end_silence": config.max_end_silence
                     }
                 )
                 # print("【调试】线程内: transcriber.start()调用成功，已启用语义断句优化")
@@ -285,6 +285,21 @@ class AliCloudSTTAdapter(STTClient):
             # print(f"【调试】发送音频数据，大小: {len(audio_data.data)}字节")  # 这行会产生大量日志，可能影响性能
             self.transcriber.send_audio(audio_data.data)
             
+            # 音频数据的最后一个块可能包含关键词的结尾部分
+            # 尝试发送一个立即检查的控制命令，以获取最新的识别结果
+            # 不等待音频块计数，立即请求，减少延迟
+            if len(audio_data.data) > 0 and not self.is_final:
+                await self._request_intermediate_result()
+            
+            # 每发送2个音频块，主动请求一次中间结果，增加实时性
+            audio_chunk_count = getattr(self, '_audio_chunk_count', 0) + 1
+            setattr(self, '_audio_chunk_count', audio_chunk_count)
+            
+            # 已在上面添加了立即请求的逻辑，这里可以作为备用
+            # if audio_chunk_count % 2 == 0 and not self.is_final:  # 从5改为2，更频繁地请求中间结果
+            #     # 主动请求中间结果
+            #     await self._request_intermediate_result()
+            
             # 直接返回当前完整的识别文本，移除复杂的文本差异对比逻辑
             return STTResponse(text=self.current_text, is_final=self.is_final)
         except Exception as e:
@@ -295,6 +310,32 @@ class AliCloudSTTAdapter(STTClient):
                 self.transcriber = None
                 raise RuntimeError("语音识别会话未启动")
             raise
+
+    async def _request_intermediate_result(self) -> None:
+        """主动请求中间识别结果
+        
+        通过发送控制命令，主动获取当前的识别状态和中间结果
+        可以在网络延迟较大时提高实时性
+        """
+        if not self.transcriber:
+            return
+            
+        # 在单独线程中发送控制命令，避免阻塞主线程
+        def send_ctrl_in_thread():
+            try:
+                # 发送获取中间结果的控制命令，使用更明确的参数
+                self.transcriber.ctrl(ex={
+                    "action": "get_intermediate_result",
+                    "request_immediate_result": True,
+                    "force_update": True
+                })
+                # print("【调试】已主动请求中间识别结果")
+            except Exception as e:
+                print(f"【错误】请求中间结果时出错: {e}")
+                
+        thread = threading.Thread(target=send_ctrl_in_thread)
+        thread.daemon = True
+        thread.start()
 
     async def end_session(self) -> Optional[STTResponse]:
         """结束语音识别会话
@@ -317,6 +358,11 @@ class AliCloudSTTAdapter(STTClient):
             try:
                 # 检查transcriber对象是否有必要的属性，避免调用stop()时出错
                 # print("【调试】线程内: 检查transcriber对象是否已正确初始化")
+                if not self.transcriber:
+                    print("【调试】线程内: transcriber已经为None，跳过停止操作")
+                    self.loop.call_soon_threadsafe(self._result_ready.set)
+                    return
+                    
                 has_task_id = hasattr(self.transcriber, '_NlsSpeechTranscriber__task_id')
                 
                 # 记录当前的task_id用于调试
@@ -326,7 +372,7 @@ class AliCloudSTTAdapter(STTClient):
                 # else:
                 #     print("【调试】线程内: _NlsSpeechTranscriber__task_id属性不存在")
                 
-                if has_task_id and self.transcriber._NlsSpeechTranscriber__task_id:
+                if has_task_id and getattr(self.transcriber, '_NlsSpeechTranscriber__task_id', None):
                     # print("【调试】线程内: 调用transcriber.stop()")
                     self.transcriber.stop()  # 停止识别器
                     # print("【调试】线程内: transcriber.stop()调用成功")
@@ -381,7 +427,7 @@ class AliCloudSTTAdapter(STTClient):
         """
         # print(f"【调试】收到识别开始回调: {message}")
         # 如果future还未完成，标记为成功完成，通知等待的协程继续执行
-        if not self.future.done():
+        if hasattr(self, 'future') and self.future and not self.future.done():
             # print("【调试】通知future识别已成功启动")
             self.loop.call_soon_threadsafe(self.future.set_result, True)
     
@@ -411,9 +457,9 @@ class AliCloudSTTAdapter(STTClient):
                     from app.global_vars import pipeline_service
                     pipeline_service = cast(PipelineService, pipeline_service)
                     pipeline_service.clear_tts_queue()
-                    # 设置静音时长
+                    # 设置静音时长，将此刻认为是用户可能暂停说话了
                     from app.llm.qwen_client import _global_to_be_processed_turns
-                    _global_to_be_processed_turns.silence_duration_auto_increase = False
+                    _global_to_be_processed_turns.silence_duration_auto_increase = False # 重置
                     _global_to_be_processed_turns.silence_duration = (0, "")
                     # print(f"[调试] 设置静音时长: {_global_to_be_processed_turns.silence_duration}")
 
@@ -515,31 +561,31 @@ class AliCloudSTTAdapter(STTClient):
         
         # 解析错误消息
         try:
-            error_data = json.loads(message)
-            status_code = error_data.get("header", {}).get("status", 0)
-            status_text = error_data.get("header", {}).get("status_text", "")
-            
-            # 检测是否为超时错误
-            if "timeout" in status_text.lower() or status_code == 40000000:
-                # print("【调试】检测到超时错误，尝试自动重连")
-                # 在事件循环中异步执行重连
-                asyncio.run_coroutine_threadsafe(self._reconnect(), self.loop)
+            if message:
+                error_data = json.loads(message)
+                status_code = error_data.get("header", {}).get("status", 0)
+                status_text = error_data.get("header", {}).get("status_text", "")
                 
-                # 标记会话已结束，避免后续send_audio_chunk调用失败
-                if hasattr(self, 'transcriber'):
-                    try:
-                        # print("【调试】在错误回调中关闭transcriber")
-                        self.transcriber.shutdown()
-                    except Exception as e:
-                        print(f"【错误】关闭transcriber时出错: {e}")
-                    finally:
-                        self.transcriber = None
-            
+                # 检测是否为超时错误
+                if "timeout" in status_text.lower() or status_code == 40000000:
+                    # print("【调试】检测到超时错误，尝试自动重连")
+                    # 在事件循环中异步执行重连
+                    asyncio.run_coroutine_threadsafe(self._reconnect(), self.loop)
+                    
+                    # 标记会话已结束，避免后续send_audio_chunk调用失败
+                    if hasattr(self, 'transcriber') and self.transcriber:
+                        try:
+                            # print("【调试】在错误回调中关闭transcriber")
+                            self.transcriber.shutdown()
+                        except Exception as e:
+                            print(f"【错误】关闭transcriber时出错: {e}")
+                        finally:
+                            self.transcriber = None
         except Exception as e:
             print(f"【错误】解析错误消息失败: {e}")
         
         # 如果future还未完成，标记为发生异常
-        if hasattr(self, 'future') and not self.future.done():
+        if hasattr(self, 'future') and self.future and not self.future.done():
             error = Exception(f"语音识别错误: {message}")
             # print("【调试】通知future发生错误")
             self.loop.call_soon_threadsafe(self.future.set_exception, error)

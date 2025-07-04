@@ -17,7 +17,7 @@ async function greet() {
 
 <template>
   <TitleBar />
-  <main class="container">
+  <main class="container" data-tauri-drag-region>
 
     <!-- <div class="feature-section">
       <SystemAudioRecorder />

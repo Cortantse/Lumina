@@ -1,6 +1,9 @@
 # app/main.py 主函数，FastAPI + Websocket 启动入口
 import os
 import asyncio
+import threading
+import time
+from pyinstrument import Profiler
 
 # --- Start of import path fix ---
 try:
@@ -23,7 +26,7 @@ from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.multimodel.vision_model import process_latest_screenshot
 from app.protocols.stt import create_websocket_handler, create_socket_handler
 from app.protocols.screenshot_ws import screenshot_ws_manager
 from app.services.pipeline import PipelineService
@@ -33,6 +36,7 @@ from app.api.v1.control import router as control_router
 from app.tts.send_tts import initialize_tts_socket, stop_tts_socket
 # 全局服务实例
 import app.global_vars as global_vars
+
 
 # 加载环境变量
 load_dotenv()
@@ -48,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 用于控制截图线程的全局变量
+screenshot_thread_running = False
 
 
 # 添加WebSocket路由
@@ -69,8 +76,6 @@ async def websocket_screenshot_endpoint(websocket: WebSocket):
 @app.on_event("startup")
 async def startup_event():
     """启动事件，初始化全局服务"""
-    global pipeline_service, websocket_handler, socket_handler
-    
     # 从环境变量获取配置
     app_key = os.environ.get("ALICLOUD_APP_KEY", "your_app_key")
     access_key_id = os.environ.get("ALIYUN_AK_ID", "")
@@ -107,24 +112,46 @@ async def startup_event():
     global_vars.socket_handler = create_socket_handler(stt_client=global_vars.pipeline_service.stt_client)
     asyncio.create_task(global_vars.socket_handler.start())
 
-    # 创建定时发送截图请求的任务(测试用)
-    print("启动定时截图请求任务(每10秒一次)")
-    asyncio.create_task(send_screenshot_requests_periodically())
-
+    # 创建定时发送截图请求的线程(测试用)
+    print("启动定时截图请求线程(每10秒一次)")
+    global screenshot_thread_running
+    screenshot_thread_running = True
+    screenshot_thread = threading.Thread(target=run_screenshot_thread, daemon=True)
+    screenshot_thread.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """关闭事件，停止全局服务"""
-    global pipeline_service, socket_handler
+    # 停止截图线程
+    global screenshot_thread_running
+    screenshot_thread_running = False
     
+    # 先停止TTS Socket
     await stop_tts_socket()
     
-    if pipeline_service:
-        pipeline_service.stop()
+    # 确保pipeline_service存在再调用stop方法
+    if hasattr(global_vars, 'pipeline_service') and global_vars.pipeline_service is not None:
+        global_vars.pipeline_service.stop()
     
-    if socket_handler:
-        await socket_handler.stop()
+    # 尝试关闭socket_handler
+    if hasattr(global_vars, 'socket_handler') and global_vars.socket_handler is not None:
+        try:
+            # 获取stop方法
+            stop_method = getattr(global_vars.socket_handler, 'stop', None)
+            if stop_method and callable(stop_method):
+                # 如果存在stop方法，尝试调用它
+                try:
+                    coro = stop_method()
+                    if asyncio.iscoroutine(coro):
+                        await coro
+                    print("Socket处理器成功停止")
+                except Exception as e:
+                    print(f"停止Socket处理器出错: {e}")
+            else:
+                print("Socket处理器没有可调用的stop方法")
+        except Exception as e:
+            print(f"关闭Socket处理器时发生错误: {e}")
 
 
 # 直接注册音频路由
@@ -134,34 +161,53 @@ app.include_router(audio_router, prefix="/api/v1")
 app.include_router(control_router, prefix="/api/v1/control")
 
 
+# 在线程中运行的截图请求函数
+def run_screenshot_thread():
+    """在线程中运行定时截图请求"""
+    print("开始定时截图请求线程(每10秒一次)")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        while screenshot_thread_running:
+            # 运行异步任务
+            loop.run_until_complete(request_and_process_screenshot())
+            
+            # 等待10秒
+            for _ in range(10):
+                if not screenshot_thread_running:
+                    break
+                time.sleep(1)
+    except Exception as e:
+        print(f"截图线程运行出错: {str(e)}")
+    finally:
+        loop.close()
+        print("截图请求线程已退出")
+
+
 # 定时发送截图请求的异步函数(测试用)
-async def send_screenshot_requests_periodically():
-    """每10秒自动发送一次截图请求"""
-    print("开始定时截图请求任务(每10秒一次)")
-    while True:
-        try:
-            # 请求截图
-            result = await screenshot_ws_manager.request_screenshot()
-            if result["success"]:
-                print(f"定时截图请求已发送，请求ID: {result.get('requestId')}")
-            else:
-                print(f"定时截图请求失败: {result['message']}")
-        except Exception as e:
-            print(f"执行定时截图请求时出错: {str(e)}")
-        
-        # 等待10秒
-        await asyncio.sleep(10)
+async def request_and_process_screenshot():
+    """请求并处理截图"""
+    try:
+        # 请求截图
+        result = await screenshot_ws_manager.request_screenshot()
+        if result["success"]:
+            # 处理最新截图
+            await process_latest_screenshot(result["requestId"])
+        else:
+            print(f"定时截图请求失败: {result['message']}")
+    except Exception as e:
+        print(f"执行定时截图请求时出错: {str(e)}")
 
 
 def main():
     """主函数，启动FastAPI应用"""
-    # 从环境变量获取主机和端口
+
+
     host = os.environ.get("API_HOST", "0.0.0.0")
     port = int(os.environ.get("API_PORT", 8000))
+    uvicorn.run("app.main:app", host=host, port=port)
     
-    # 启动FastAPI应用
-    uvicorn.run(app, host=host, port=port)
-
 
 if __name__ == "__main__":
     main()

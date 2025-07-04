@@ -7,6 +7,7 @@
       :idleIntensity="0.3"
       :listeningIntensity="currentListeningIntensity"
       :speakingIntensity="currentSpeakingIntensity"
+      data-tauri-drag-region
     />
     
     <!-- 三点菜单按钮 -->

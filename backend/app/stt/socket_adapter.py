@@ -78,6 +78,11 @@ class SocketSTTHandler:
         self.audio_chunk_count = 0
         self.active_connections = {}
         self.audio_buffer: List[bytes] = []
+
+        self.last_text = ""
+        
+        # 结果去重相关变量
+        self.last_sent_result_id = None
         
         # print("【调试】Socket STT处理器初始化完成")
     
@@ -461,6 +466,11 @@ class SocketSTTHandler:
         if not self.result_client:
             # print("【警告】尝试发送识别结果，但结果接收器未连接")
             return
+
+        # 添加去重机制，避免发送相同的结果
+        if response.text == self.last_text:
+            # print(f"【调试】跳过发送重复的识别结果: '{response.text}' (是否最终结果: {response.is_final})")
+            return
             
         try:
             # print(f"【调试】向客户端发送识别结果: "
@@ -475,6 +485,9 @@ class SocketSTTHandler:
             
             # 发送识别结果 (添加换行符以便Rust客户端解析)
             await loop.sock_sendall(self.result_client, result_json + b'\n')
+            
+            # 记录已发送的结果ID，用于去重
+            self.last_text = response.text
             
             # print(f"【调试】已发送识别结果: '{response.text}' (是否最终结果: {response.is_final})")
         except Exception as e:

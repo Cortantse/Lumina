@@ -4,11 +4,32 @@ import time
 import copy
 import threading
 import asyncio
+import inspect
 from typing import Any, Dict, Optional, Callable
 
 from app.core import config
 from app.std.state_machine import SilenceState, State
 from app.utils.exception import print_error, print_warning
+
+
+def is_unpickleable(obj) -> bool:
+    """
+    检查对象是否包含不可序列化的组件（如线程锁）
+    """
+    # 检查是否为线程锁
+    if isinstance(obj, threading._RLock) or isinstance(obj, threading.Lock) or isinstance(obj, threading.RLock) or str(type(obj)) == "<class '_thread.lock'>":
+        return True
+        
+    # 检查常见线程相关对象
+    if isinstance(obj, threading.Thread) or isinstance(obj, threading.Condition):
+        return True
+        
+    # 对象类型名称中包含"lock"或"thread"
+    type_name = str(type(obj)).lower()
+    if "lock" in type_name or "thread" in type_name or "condition" in type_name:
+        return True
+        
+    return False
 
 
 class Timer:
@@ -29,10 +50,13 @@ class Timer:
                     self.saved_context[key] = copy.deepcopy(value)
                 except Exception as e:
                     # 如果无法深拷贝，则保存引用
-                    self.saved_context[key] = value
-                    import traceback
-                    error_trace = traceback.format_exc()
-                    print_error(Timer.__init__, f"错误: {e} 无法深拷贝上下文变量: {key}\n调用堆栈: \n{error_trace}")
+                    # print_warning(Timer.__init__, f"无法深拷贝对象 {key}，使用引用代替: {e}")
+                    try:
+                        # 尝试使用浅拷贝
+                        self.saved_context[key] = copy.copy(value)
+                    except:
+                        # 如果浅拷贝也失败，则直接使用引用
+                        self.saved_context[key] = value
         self.state = None
         self.pass_timeout = False
         self.start_time = time.time() # 现在就开始计时
@@ -64,7 +88,7 @@ class Timer:
     def reset_global_to_be_processed_turns_and_llm_context(self):
         """
         重置 global_to_be_processed_turns 和 llm_context
-        当因为用户打断而需要重置时，需要把原先进入 llm_context 的 global_to_be_processed_turns 拿出来
+        当因为用户打断而需要重置
         这里选择直接重置
         """
         from app.llm.qwen_client import _global_to_be_processed_turns, _llm_context
