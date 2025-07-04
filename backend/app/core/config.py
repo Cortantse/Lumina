@@ -28,7 +28,7 @@ stt_auto_refresh_threshold = 10 # 自动刷新阈值，单位：秒，从15减�
 use_round_count = 6 # 使用多少轮历史记录来生成预回复
 
 # std 参数
-recent_judge_context_count = 14 # 最近 std 判断上下文数量
+recent_judge_context_count = 25 # 最近 std 判断上下文数量
 critical_threshold = 800 # 临界阈值，单位：毫秒，0.8s内用户说话则认为用户再延续发言
 
 # STD判断过于保守相关参数

@@ -70,7 +70,7 @@ async def get_file_content() -> Tuple[str, str]:
     except Exception as e:
         raise ValueError(f"读取文件内容失败: {str(e)}")
 
-def get_file_content_sync() -> Tuple[str, str]:
+def get_file_content_sync() -> Optional[Tuple[str, str]]:
     """
     获取最新上传文件的名称和内容的同步版本。供模块间调用的函数，非HTTP API。
     不接收参数，直接返回最新上传的文件。
@@ -86,7 +86,7 @@ def get_file_content_sync() -> Tuple[str, str]:
     file_path = get_latest_uploaded_file()
     
     if not file_path:
-        raise FileNotFoundError("未找到任何上传文件")
+        return None
         
     # 获取文件名和扩展名
     file_name = os.path.basename(file_path)
@@ -118,7 +118,7 @@ def get_file_content_sync() -> Tuple[str, str]:
         return file_name, content
         
     except Exception as e:
-        raise ValueError(f"读取文件内容失败: {str(e)}")
+        return None
 
 def get_latest_uploaded_file() -> Optional[str]:
     """
