@@ -9,8 +9,6 @@ import time
 
 # 导入文件处理模块
 from app.file_reader.manager import process_and_store_file
-# 导入上下文模块
-from app.models.context import SystemContext
 from app.protocols.memory import Memory
 # 导入PDF处理函数
 from app.file_reader.pdf_reader import extract_text_from_pdf
@@ -27,9 +25,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 存储正在处理的文件状态
 file_processing_status: Dict[str, Dict[str, Any]] = {}
-
-# 全局系统上下文
-current_system_context = SystemContext()
 
 # 最新上传的文件记录
 latest_uploaded_file: Optional[str] = None
@@ -226,8 +221,6 @@ async def process_file_task(file_path: str, file_id: str):
         # 处理并存储文件
         result = await process_and_store_file(file_path)
         
-        # 读取文件内容并添加到系统上下文
-        await add_file_to_context(file_path)
         
         # 更新状态为完成
         file_processing_status[file_id] = {
@@ -250,44 +243,7 @@ async def process_file_task(file_path: str, file_id: str):
             "message": error_msg
         }
 
-async def add_file_to_context(file_path: str):
-    """
-    读取文件内容并添加到系统上下文中
-    
-    Args:
-        file_path: 文件路径
-    """
-    global current_system_context
-    
-    try:
-        # 获取文件名和扩展名
-        file_name = os.path.basename(file_path)
-        file_extension = os.path.splitext(file_path)[1].lower()
-        
-        # 根据文件类型读取内容
-        if file_extension in ['.txt', '.md']:
-            # 文本文件直接读取
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        elif file_extension == '.pdf':
-            # PDF文件使用专门的函数提取文本
-            content = await extract_text_from_pdf(file_path)
-        else:
-            # 其他文件类型，提供简单说明
-            size = os.path.getsize(file_path)
-            content = f"[二进制文件: {file_name}, 大小: {size} 字节]"
-            
-        # 创建上下文键名
-        context_key = f"file_{file_name.replace('.', '_')}"
-        
-        # 添加到系统上下文
-        current_system_context.add(context_key, content)
-        
-        print(f"已将文件 '{file_name}' 内容添加到系统上下文中，键名: {context_key}")
-        
-    except Exception as e:
-        print(f"将文件添加到上下文时出错: {str(e)}")
-        raise
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
@@ -435,67 +391,3 @@ async def get_processing_status(file_id: str):
         raise HTTPException(status_code=404, detail="找不到指定文件的处理状态")
         
     return file_processing_status[file_id]
-
-@router.get("/context")
-async def get_current_context():
-    """
-    获取当前系统上下文
-    
-    Returns:
-        当前系统上下文的所有键值对
-    """
-    return {
-        "context_items": current_system_context.directives,
-        "total_items": len(current_system_context.directives)
-    }
-
-@router.delete("/context/{key}")
-async def remove_from_context(key: str):
-    """
-    从上下文中删除指定键
-    
-    Args:
-        key: 要删除的键名
-        
-    Returns:
-        删除操作状态
-    """
-    global current_system_context
-    
-    if key in current_system_context.directives:
-        current_system_context.remove(key)
-        return {"status": "success", "message": f"已从上下文中删除键 '{key}'"}
-    else:
-        raise HTTPException(status_code=404, detail=f"上下文中不存在键 '{key}'")
-
-@router.put("/context/{key}")
-async def update_context(key: str, value: Dict[str, Any]):
-    """
-    更新上下文中的指定键
-    
-    Args:
-        key: 要更新的键名
-        value: 新值
-        
-    Returns:
-        更新操作状态
-    """
-    global current_system_context
-    
-    if "content" not in value:
-        raise HTTPException(status_code=400, detail="请求体必须包含 'content' 字段")
-    
-    current_system_context.add(key, value["content"])
-    return {"status": "success", "message": f"已更新上下文中的键 '{key}'"}
-
-@router.post("/context/clear")
-async def clear_context():
-    """
-    清空上下文
-    
-    Returns:
-        操作状态
-    """
-    global current_system_context
-    current_system_context = SystemContext()
-    return {"status": "success", "message": "上下文已清空"}

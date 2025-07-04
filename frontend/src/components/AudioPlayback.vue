@@ -26,6 +26,10 @@
         <span class="menu-icon">⚙️</span>
         <span>选择麦克风</span>
       </div>
+      <div class="menu-item" @click="(event) => openFileUpload(event)">
+        <span class="menu-icon">📁</span>
+        <span>文件上传</span>
+      </div>
     </div>
 
     <!-- 麦克风选择器对话框 -->
@@ -55,6 +59,17 @@
             <button class="confirm-button" @click="confirmMicrophoneChange">确定</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 文件上传对话框 -->
+    <div class="dialog-overlay" v-if="showFileUpload">
+      <div class="dialog-content file-upload-dialog">
+        <div class="dialog-header">
+          <h4>文件上传</h4>
+          <span class="close-icon" @click="showFileUpload = false">×</span>
+        </div>
+        <FileUpload @close="showFileUpload = false" />
       </div>
     </div>
 
@@ -115,6 +130,7 @@ import { AudioCaptureInterface, MicrophoneDevice, VadEventType } from '../types/
 import SiriWave from './SiriWave.vue';
 import audioAnalyzer, { AudioFeatures } from '../services/audioAnalyzer';
 import backendAudioPlayer from '../services/backendAudioPlayer';
+import FileUpload from './FileUpload.vue';
 
 // --- 组件核心状态 ---
 const COMPONENT_NAME = 'AudioPlayback';
@@ -155,6 +171,7 @@ const showMenu = ref(false);
 const showMicSelector = ref(false);
 const showResults = ref(false);
 const showHistory = ref(false);
+const showFileUpload = ref(false);
 
 // --- 其他 ---
 const debug = ref(false); // 调试模式开关
@@ -186,6 +203,14 @@ function openMicrophoneSelector(event?: Event) {
   }
   showMenu.value = false;
   showMicSelector.value = true;
+}
+
+function openFileUpload(event?: Event) {
+  if (event) {
+    event.stopPropagation(); // 阻止事件冒泡
+  }
+  showMenu.value = false;
+  showFileUpload.value = true;
 }
 
 function confirmMicrophoneChange() {
@@ -1468,6 +1493,11 @@ button:disabled {
 .clear-history {
   background-color: #ff9800;
   color: white;
+}
+
+.file-upload-dialog {
+  max-width: 400px;
+  width: 90%;
 }
 </style>
 

@@ -65,26 +65,37 @@ const processingStatusClass = computed(() => {
 
 // 上传状态和处理状态
 const { uploadStatus, processingStatus } = fileUploadService;
+
+// 发出关闭事件
+const emit = defineEmits(['close']);
+
+// 关闭对话框
+const closeDialog = () => {
+  emit('close');
+};
 </script>
 
 <template>
   <div class="file-upload">
-    <h2>文件上传</h2>
+    <!-- 右上角退出按钮 -->
+    <!-- <div class="close-button" @click="closeDialog">×</div> -->
     
     <!-- 文件选择区域 -->
-    <div class="file-select-area">
+    <div class="file-select-area" @click="fileInput?.click()">
       <input 
         type="file" 
         ref="fileInput"
         @change="handleFileChange" 
-        :disabled="uploadStatus.isUploading || processingStatus?.status === 'processing'" 
+        :disabled="uploadStatus.isUploading || processingStatus?.status === 'processing'"
+        style="display: none;"
       />
-      
-      <!-- 显示选择的文件信息 -->
-      <div v-if="file" class="file-info">
-        <p>文件名: {{ file.name }}</p>
-        <p>类型: {{ file.type || '未知' }}</p>
-        <p>大小: {{ fileSize }}</p>
+      <div class="select-prompt">
+        <div class="file-icon">📄</div>
+        <div v-if="!file" class="prompt-text">选择文件</div>
+        <div v-else class="file-info">
+          <div class="file-name">{{ file.name }}</div>
+          <div class="file-size">{{ fileSize }}</div>
+        </div>
       </div>
     </div>
     
@@ -101,29 +112,15 @@ const { uploadStatus, processingStatus } = fileUploadService;
       <div class="processing-status" :class="processingStatusClass">
         <div class="status-icon" :class="processingStatus.status"></div>
         <div class="status-text">
-          <strong>处理状态:</strong> {{ processingStatus.message }}
+          {{ processingStatus.message }}
         </div>
       </div>
       
       <div v-if="processingStatus.status === 'processing'" class="progress-bar">
         <div class="progress progress-processing" :style="{ width: processingStatus.progress + '%' }"></div>
       </div>
-      
-      <!-- 显示处理结果或错误 -->
-      <div v-if="processingStatus.status === 'completed'" class="result-container">
-        <div class="result-title">处理结果:</div>
-        <div v-if="processingStatus.result" class="result-data">
-          <pre>{{ JSON.stringify(processingStatus.result, null, 2) }}</pre>
-        </div>
-      </div>
-      
-      <div v-if="processingStatus.status === 'failed' && processingStatus.error" class="error-container">
-        <div class="error-title">处理错误:</div>
-        <div class="error-message">{{ processingStatus.error }}</div>
-      </div>
     </div>
     
-    <!-- 上传状态和错误信息 -->
     <div v-if="uploadStatus.error" class="error-message">
       {{ uploadStatus.error }}
     </div>
@@ -135,19 +132,18 @@ const { uploadStatus, processingStatus } = fileUploadService;
     <!-- 操作按钮 -->
     <div class="actions">
       <button 
+        @click="resetFile" 
+        :disabled="!file || uploadStatus.isUploading || processingStatus?.status === 'processing'" 
+        class="reset-btn"
+      >
+        重置
+      </button>
+      <button 
         @click="uploadFile" 
         :disabled="!file || uploadStatus.isUploading || processingStatus?.status === 'processing'" 
         class="upload-btn"
       >
         {{ uploadStatus.isUploading ? '上传中...' : '上传文件' }}
-      </button>
-      
-      <button 
-        @click="resetFile" 
-        :disabled="uploadStatus.isUploading || processingStatus?.status === 'processing'"
-        class="reset-btn"
-      >
-        重置
       </button>
     </div>
   </div>
@@ -155,39 +151,101 @@ const { uploadStatus, processingStatus } = fileUploadService;
 
 <style scoped>
 .file-upload {
-  max-width: 500px;
-  margin: 0 auto;
-  padding: 20px;
+  padding: 10px;
   border-radius: 8px;
-  background-color: var(--color-background-soft, #f9f9f9);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  background-color: transparent;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.close-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.1);
+  color: #333;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.close-button:hover {
+  background-color: rgba(0, 0, 0, 0.2);
 }
 
 .file-select-area {
-  margin: 20px 0;
-  padding: 15px;
+  margin: 5px 0;
+  padding: 10px;
   border: 2px dashed #ccc;
-  border-radius: 5px;
+  border-radius: 8px;
   background-color: var(--color-background, #ffffff);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+  min-height: 80px;
+}
+
+.file-select-area:hover {
+  border-color: #4caf50;
+  background-color: rgba(76, 175, 80, 0.05);
+}
+
+.select-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-icon {
+  font-size: 24px;
+  margin-bottom: 5px;
+}
+
+.prompt-text {
+  font-size: 14px;
+  color: #666;
 }
 
 .file-info {
-  margin-top: 15px;
-  padding: 10px;
-  background-color: rgba(0, 0, 0, 0.03);
-  border-radius: 5px;
+  text-align: center;
+  width: 100%;
+}
+
+.file-name {
+  font-weight: bold;
+  word-break: break-all;
+  margin-bottom: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+}
+
+.file-size {
+  font-size: 12px;
+  color: #666;
 }
 
 .progress-container,
 .processing-container {
-  margin: 15px 0;
+  margin: 8px 0;
+  width: 100%;
 }
 
 .progress-bar {
   width: 100%;
-  height: 10px;
+  height: 4px;
   background-color: #eee;
-  border-radius: 5px;
+  border-radius: 2px;
   overflow: hidden;
 }
 
@@ -203,33 +261,39 @@ const { uploadStatus, processingStatus } = fileUploadService;
 
 .progress-text {
   text-align: center;
-  margin-top: 5px;
-  font-size: 14px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #666;
 }
 
 .error-message {
   color: #f44336;
-  margin: 10px 0;
-  padding: 10px;
+  margin: 5px 0;
+  padding: 5px;
+  font-size: 11px;
   background-color: rgba(244, 67, 54, 0.1);
-  border-radius: 5px;
+  border-radius: 4px;
+  word-break: break-word;
 }
 
 .success-message {
   color: #4caf50;
-  margin: 10px 0;
-  padding: 10px;
+  margin: 5px 0;
+  padding: 5px;
+  font-size: 11px;
   background-color: rgba(76, 175, 80, 0.1);
-  border-radius: 5px;
+  border-radius: 4px;
 }
 
 .processing-status {
   display: flex;
   align-items: center;
-  margin-bottom: 10px;
-  padding: 10px;
-  border-radius: 5px;
+  margin-bottom: 5px;
+  padding: 5px;
+  border-radius: 4px;
   background-color: rgba(0, 0, 0, 0.03);
+  font-size: 11px;
+  word-break: break-word;
 }
 
 .processing-status.processing-status {
@@ -245,10 +309,15 @@ const { uploadStatus, processingStatus } = fileUploadService;
 }
 
 .status-icon {
-  width: 16px;
-  height: 16px;
+  min-width: 10px;
+  height: 10px;
   border-radius: 50%;
-  margin-right: 10px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.status-text {
+  flex: 1;
 }
 
 .status-icon.uploaded {
@@ -268,81 +337,35 @@ const { uploadStatus, processingStatus } = fileUploadService;
   background-color: #f44336;
 }
 
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 0.7;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.result-container,
-.error-container {
-  margin-top: 15px;
-  padding: 10px;
-  border-radius: 5px;
-  background-color: rgba(0, 0, 0, 0.03);
-}
-
-.result-title,
-.error-title {
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-
-.result-data {
-  max-height: 200px;
-  overflow: auto;
-  font-size: 12px;
-  font-family: monospace;
-  background-color: #f5f5f5;
-  padding: 8px;
-  border-radius: 4px;
-}
-
-pre {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
 .actions {
   display: flex;
-  gap: 10px;
-  margin-top: 20px;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
 }
 
-button {
-  padding: 8px 16px;
+.upload-btn, .reset-btn {
+  flex: 1;
+  padding: 6px 10px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-weight: 500;
+  font-size: 13px;
   transition: background-color 0.2s;
 }
 
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .upload-btn {
-  background-color: #2196F3;
+  background-color: #4caf50;
   color: white;
 }
 
 .upload-btn:hover:not(:disabled) {
-  background-color: #1976D2;
+  background-color: #45a049;
 }
 
 .reset-btn {
-  background-color: #f5f5f5;
+  background-color: #f0f0f0;
   color: #333;
 }
 
@@ -350,64 +373,20 @@ button:disabled {
   background-color: #e0e0e0;
 }
 
-@media (prefers-color-scheme: dark) {
-  .file-upload {
-    background-color: var(--color-background-soft, #2a2a2a);
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
   }
-  
-  .file-select-area {
-    background-color: var(--color-background, #333333);
-    border-color: #555;
+  50% {
+    opacity: 1;
   }
-  
-  .file-info {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  
-  .progress-bar {
-    background-color: #444;
-  }
-  
-  .error-message {
-    background-color: rgba(244, 67, 54, 0.2);
-  }
-  
-  .success-message {
-    background-color: rgba(76, 175, 80, 0.2);
-  }
-  
-  .processing-status {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  
-  .processing-status.processing-status {
-    background-color: rgba(33, 150, 243, 0.2);
-  }
-  
-  .processing-status.success-status {
-    background-color: rgba(76, 175, 80, 0.2);
-  }
-  
-  .processing-status.error-status {
-    background-color: rgba(244, 67, 54, 0.2);
-  }
-  
-  .result-container,
-  .error-container {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-  
-  .result-data {
-    background-color: #333;
-  }
-  
-  .reset-btn {
-    background-color: #333;
-    color: #f0f0f0;
-  }
-  
-  .reset-btn:hover:not(:disabled) {
-    background-color: #444;
+  100% {
+    opacity: 0.6;
   }
 }
 </style> 
