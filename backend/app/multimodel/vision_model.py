@@ -58,7 +58,7 @@ async def process_latest_screenshot(request_id: Optional[str] = None) -> Dict:
         # 构建API请求
         prompt = """请详细描述这张图片中的内容，包括可见的元素、场景和可能的活动。
 尽量客观描述，不要添加不存在的内容。
-控制在200字左右，确保信息完整而简洁。
+控制在200字左右，确保信息完整，尤其是用户正在进行演讲的场景，需要能讲解当前的 ppt。
 回复应当包含图像中的重要文本内容（如有）。
 """
         
@@ -110,14 +110,14 @@ async def process_latest_screenshot(request_id: Optional[str] = None) -> Dict:
         print(error_message)
         return {"success": False, "message": error_message, "request_id": request_id}
 
-async def get_latest_screenshot_text() -> str:
+async def get_latest_screenshot_text() -> Optional[str]:
     """
     获取最新截图的文本
     返回：
         - 截图文本（大概控制在 200 词）
     """
     if not _screenshot_descriptions:
-        return "尚未生成任何截图描述"
+        return None
     
     # 直接返回最新生成的描述
     return _screenshot_descriptions[-1]
